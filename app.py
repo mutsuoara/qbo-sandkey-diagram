@@ -5,7 +5,7 @@ and displays financial flows using interactive Sankey diagrams.
 """
 
 import dash
-from dash import dcc, html, Input, Output, State, callback
+from dash import dcc, html, Input, Output, State, callback, ctx
 import plotly.graph_objects as go
 import pandas as pd
 import logging
@@ -28,7 +28,7 @@ is_authenticated = False
 company_info = None
 
 # Initialize Dash app
-app = dash.Dash(__name__)
+app = dash.Dash(__name__, suppress_callback_exceptions=True)
 app.title = "QBO Sankey Dashboard"
 
 # Helper functions
@@ -82,7 +82,7 @@ def create_setup_page():
                 ], style={'textAlign': 'center'})
             ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
         ], style={'maxWidth': '600px', 'margin': '0 auto'})
-    ])
+    ], id='setup-page-container')
 
 def create_welcome_page():
     """Create the welcome page"""
@@ -104,7 +104,7 @@ def create_welcome_page():
                                   'fontSize': '14px', 'fontWeight': 'bold', 'display': 'block', 'margin': '20px auto'})
             ], style={'backgroundColor': 'white', 'padding': '40px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
         ], style={'maxWidth': '600px', 'margin': '0 auto'})
-    ])
+    ], id='welcome-page-container')
 
 def create_success_page():
     """Create the success page after OAuth"""
@@ -119,39 +119,51 @@ def create_success_page():
                        style={'color': '#7f8c8d', 'textAlign': 'center', 'fontSize': '14px', 'marginTop': '20px'})
             ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
         ], style={'maxWidth': '600px', 'margin': '0 auto'})
-    ])
+    ], id='success-page-container')
 
-# VALIDATION LAYOUT - Contains all components for callback validation
-# This is the official Dash recommended approach for dynamic/multi-page apps
-def create_validation_layout():
-    """
-    Create a complete layout containing ALL components used in callbacks.
-    This allows Dash to validate all callbacks without raising exceptions.
-    This layout is never shown to users - it's only for validation.
-    """
+def create_error_page(message):
+    """Create an error page with a custom message"""
     return html.Div([
-        dcc.Location(id='url', refresh=False),
-        html.Div(id="main-content"),
-        
-        # Setup page components
-        dcc.Input(id="setup-client-id"),
-        dcc.Input(id="setup-client-secret"),
-        dcc.RadioItems(id="setup-environment"),
-        html.Button(id="save-credentials-btn"),
-        html.Button(id="test-setup-btn"),
-        
-        # Welcome page components
-        html.Button(id="connect-btn"),
-        html.Button(id="reset-setup-btn"),
+        html.Div([
+            html.H2("Error", style={'textAlign': 'center', 'color': '#e74c3c', 'marginBottom': '20px'}),
+            html.Div([
+                html.P(message, 
+                       style={'color': '#e74c3c', 'textAlign': 'center', 'padding': '15px', 
+                              'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'})
+            ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
+        ], style={'maxWidth': '600px', 'margin': '0 auto'})
     ])
 
-# Set validation layout (for callback validation)
-app.validation_layout = create_validation_layout()
+def create_oauth_page(auth_url, environment):
+    """Create the OAuth authorization page"""
+    return html.Div([
+        html.Div([
+            html.H2("Connect to QuickBooks", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
+            html.Div([
+                html.P("Click the button below to authorize this application with QuickBooks Online.", 
+                       style={'color': '#7f8c8d', 'textAlign': 'center', 'padding': '15px', 
+                              'backgroundColor': '#f8f9fa', 'borderRadius': '4px', 'marginBottom': '20px'}),
+                html.P(f"Environment: {environment.title()}", 
+                       style={'color': '#155724', 'textAlign': 'center', 'padding': '10px', 
+                              'backgroundColor': '#d4edda', 'borderRadius': '4px', 'borderLeft': '4px solid #28a745', 
+                              'marginBottom': '20px'}),
+                html.A("Authorize with QuickBooks", 
+                       href=auth_url, 
+                       target="_blank",
+                       style={'display': 'block', 'backgroundColor': '#0077be', 'color': 'white', 
+                              'textAlign': 'center', 'padding': '15px 30px', 'borderRadius': '4px', 
+                              'textDecoration': 'none', 'fontWeight': 'bold', 'margin': '20px auto', 
+                              'maxWidth': '300px'}),
+                html.P("After authorization, you'll be redirected back to this application.", 
+                       style={'color': '#7f8c8d', 'textAlign': 'center', 'fontSize': '12px', 'marginTop': '15px'})
+            ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
+        ], style={'maxWidth': '600px', 'margin': '0 auto'})
+    ])
 
-# App layout (what users actually see)
+# App layout - simple and clean, content managed by callbacks
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
-    html.Div(id="main-content", children=create_setup_page() if not check_credentials() else create_welcome_page(), 
+    html.Div(id="main-content", 
              style={'padding': '20px', 'maxWidth': '1200px', 'margin': '0 auto'}),
     html.Footer([
         html.P("QBO Sankey Dashboard - Secure Financial Visualization", 
@@ -159,231 +171,183 @@ app.layout = html.Div([
     ], style={'backgroundColor': '#34495e', 'padding': '15px', 'color': 'white', 'marginTop': '20px'})
 ], style={'fontFamily': 'Arial, sans-serif', 'minHeight': '100vh', 'backgroundColor': '#f5f5f5'})
 
-# Single callback for all page interactions using callback_context
+# Callback to handle initial page load based on credentials
 @app.callback(
     Output("main-content", "children"),
-    [
-        Input("url", "search"), 
-        Input("url", "pathname"),
-        Input("save-credentials-btn", "n_clicks"),
-        Input("test-setup-btn", "n_clicks"),
-        Input("connect-btn", "n_clicks"),
-        Input("reset-setup-btn", "n_clicks")
-    ],
-    [
-        State("setup-client-id", "value"),
-        State("setup-client-secret", "value"),
-        State("setup-environment", "value")
-    ],
-    prevent_initial_call=True,  # Changed to True - this is the key fix!
+    Input("url", "pathname"),
+    prevent_initial_call=False
 )
-def handle_all_interactions(search, pathname, save_clicks, test_clicks, connect_clicks, reset_clicks, 
-                           client_id, client_secret, environment):
-    """Handle all page interactions using callback_context"""
-    global is_authenticated, company_info
-    
-    # Use callback_context to determine which input triggered the callback
-    ctx = dash.callback_context
-    if not ctx.triggered:
-        # Initial load - show appropriate page
-        if check_credentials():
-            return create_welcome_page()
-        else:
-            return create_setup_page()
-    
-    # Get the triggered input
-    triggered = ctx.triggered[0]
-    trigger_id = triggered['prop_id'].split('.')[0]
-    
-    # Handle different triggers
-    if trigger_id == 'url':
-        # Handle URL changes (OAuth callback)
-        if search and 'auth=success' in search:
-            logger.info("OAuth success detected")
-            is_authenticated = True
-            return create_success_page()
-        elif search and 'auth=error' in search:
-            logger.error("OAuth error detected")
-            return html.Div([
-                html.Div([
-                    html.H2("Authentication Failed", style={'textAlign': 'center', 'color': '#e74c3c', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.P("OAuth authentication failed. Please try again.", 
-                               style={'color': '#e74c3c', 'textAlign': 'center', 'padding': '15px', 
-                                      'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'})
-                    ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-                ], style={'maxWidth': '600px', 'margin': '0 auto'})
-            ])
-    
-    elif trigger_id == 'save-credentials-btn':
-        # Handle Save Credentials button
-        logger.info("Save credentials button clicked")
-        if not client_id or not client_secret:
-            return html.Div([
-                html.Div([
-                    html.H2("Setup Error", style={'textAlign': 'center', 'color': '#e74c3c', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.P("Please enter both Client ID and Client Secret.", 
-                               style={'color': '#e74c3c', 'textAlign': 'center', 'padding': '15px', 
-                                      'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'})
-                    ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-                ], style={'maxWidth': '600px', 'margin': '0 auto'})
-            ])
-        
-        # Store credentials
-        credential_manager = CredentialManager()
-        credentials = {
-            'client_id': client_id,
-            'client_secret': client_secret,
-            'environment': environment if environment else 'sandbox'
-        }
-        
-        if credential_manager.store_credentials(credentials):
-            logger.info("Credentials saved successfully")
-            return create_welcome_page()
-        else:
-            return html.Div([
-                html.Div([
-                    html.H2("Save Error", style={'textAlign': 'center', 'color': '#e74c3c', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.P("Failed to save credentials. Please try again.", 
-                               style={'color': '#e74c3c', 'textAlign': 'center', 'padding': '15px', 
-                                      'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'})
-                    ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-                ], style={'maxWidth': '600px', 'margin': '0 auto'})
-            ])
-    
-    elif trigger_id == 'test-setup-btn':
-        # Handle Test Setup button
-        logger.info("Test setup button clicked")
-        if not client_id or not client_secret:
-            return html.Div([
-                html.Div([
-                    html.H2("Test Error", style={'textAlign': 'center', 'color': '#e74c3c', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.P("Please enter both Client ID and Client Secret to test.", 
-                               style={'color': '#e74c3c', 'textAlign': 'center', 'padding': '15px', 
-                                      'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'})
-                    ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-                ], style={'maxWidth': '600px', 'margin': '0 auto'})
-            ])
-        
-        # Test credentials by trying to create OAuth URL
-        try:
-            state = secrets.token_urlsafe(32)
-            auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
-            
-            return html.Div([
-                html.Div([
-                    html.H2("Setup Test Successful", style={'textAlign': 'center', 'color': '#27ae60', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.P("Your credentials are valid! You can now save them and connect to QuickBooks.", 
-                               style={'color': '#155724', 'textAlign': 'center', 'padding': '15px', 
-                                      'backgroundColor': '#d4edda', 'borderRadius': '4px', 'borderLeft': '4px solid #28a745'})
-                    ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-                ], style={'maxWidth': '600px', 'margin': '0 auto'})
-            ])
-        except Exception as e:
-            return html.Div([
-                html.Div([
-                    html.H2("Test Failed", style={'textAlign': 'center', 'color': '#e74c3c', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.P(f"Test failed: {str(e)}", 
-                               style={'color': '#e74c3c', 'textAlign': 'center', 'padding': '15px', 
-                                      'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'})
-                    ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-                ], style={'maxWidth': '600px', 'margin': '0 auto'})
-            ])
-    
-    elif trigger_id == 'connect-btn':
-        # Handle Connect to QuickBooks button
-        logger.info("Connect to QuickBooks button clicked")
-        try:
-            # Get stored credentials
-            credential_manager = CredentialManager()
-            credentials = credential_manager.get_credentials()
-            
-            if not credentials:
-                return html.Div([
-                    html.Div([
-                        html.H2("Setup Required", style={'textAlign': 'center', 'color': '#e74c3c', 'marginBottom': '20px'}),
-                        html.Div([
-                            html.P("No credentials found. Please set up your QuickBooks app credentials first.", 
-                                   style={'color': '#e74c3c', 'textAlign': 'center', 'padding': '15px', 
-                                          'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'})
-                        ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-                    ], style={'maxWidth': '600px', 'margin': '0 auto'})
-                ])
-            
-            # Start OAuth flow
-            client_id = credentials.get('client_id')
-            environment = credentials.get('environment', 'sandbox')
-            
-            # Generate OAuth URL with state parameter for security
-            state = secrets.token_urlsafe(32)
-            auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
-            
-            return html.Div([
-                html.Div([
-                    html.H2("Connect to QuickBooks", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.P("Click the button below to authorize this application with QuickBooks Online.", 
-                               style={'color': '#7f8c8d', 'textAlign': 'center', 'padding': '15px', 
-                                      'backgroundColor': '#f8f9fa', 'borderRadius': '4px', 'marginBottom': '20px'}),
-                        html.P(f"Environment: {environment.title()}", 
-                               style={'color': '#155724', 'textAlign': 'center', 'padding': '10px', 
-                                      'backgroundColor': '#d4edda', 'borderRadius': '4px', 'borderLeft': '4px solid #28a745', 
-                                      'marginBottom': '20px'}),
-                        html.A("Authorize with QuickBooks", 
-                               href=auth_url, 
-                               target="_blank",
-                               style={'display': 'block', 'backgroundColor': '#0077be', 'color': 'white', 
-                                      'textAlign': 'center', 'padding': '15px 30px', 'borderRadius': '4px', 
-                                      'textDecoration': 'none', 'fontWeight': 'bold', 'margin': '20px auto', 
-                                      'maxWidth': '300px'}),
-                        html.P("After authorization, you'll be redirected back to this application.", 
-                               style={'color': '#7f8c8d', 'textAlign': 'center', 'fontSize': '12px', 'marginTop': '15px'})
-                    ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-                ], style={'maxWidth': '600px', 'margin': '0 auto'})
-            ])
-            
-        except Exception as e:
-            logger.error(f"Error starting OAuth flow: {e}")
-            return html.Div([
-                html.Div([
-                    html.H2("Connection Error", style={'textAlign': 'center', 'color': '#e74c3c', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.P(f"Error starting QuickBooks connection: {str(e)}", 
-                               style={'color': '#e74c3c', 'textAlign': 'center', 'padding': '15px', 
-                                      'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'})
-                    ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-                ], style={'maxWidth': '600px', 'margin': '0 auto'})
-            ])
-    
-    elif trigger_id == 'reset-setup-btn':
-        # Handle Reset Setup button
-        logger.info("Reset setup button clicked")
-        try:
-            # Clear keyring credentials
-            credential_manager = CredentialManager()
-            credential_manager.clear_credentials()
-            credential_manager.clear_tokens()
-            
-            # Also remove temporary file if it exists
-            if os.path.exists('temp_credentials.json'):
-                os.remove('temp_credentials.json')
-                logger.info("Temporary credentials file deleted")
-            
-            logger.info("All credentials cleared successfully")
-            return create_setup_page()
-        except Exception as e:
-            logger.error(f"Failed to clear credentials: {e}")
-            return create_setup_page()
-    
-    # Default: show appropriate page based on credentials
+def display_initial_page(pathname):
+    """Display the appropriate initial page"""
+    logger.info(f"Initial page load - pathname: {pathname}")
     if check_credentials():
+        logger.info("Credentials found - showing welcome page")
         return create_welcome_page()
     else:
+        logger.info("No credentials found - showing setup page")
+        return create_setup_page()
+
+# Callback to handle URL changes (OAuth redirects)
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("url", "search"),
+    prevent_initial_call=True
+)
+def handle_url_changes(search):
+    """Handle OAuth callback URL changes"""
+    global is_authenticated
+    
+    if search and 'auth=success' in search:
+        logger.info("OAuth success detected")
+        is_authenticated = True
+        return create_success_page()
+    elif search and 'auth=error' in search:
+        logger.error("OAuth error detected")
+        return create_error_page("OAuth authentication failed. Please try again.")
+    
+    return dash.no_update
+
+# Callback to handle Save Credentials button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("save-credentials-btn", "n_clicks"),
+    State("setup-client-id", "value"),
+    State("setup-client-secret", "value"),
+    State("setup-environment", "value"),
+    prevent_initial_call=True
+)
+def save_credentials(n_clicks, client_id, client_secret, environment):
+    """Handle Save Credentials button click"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Save credentials button clicked")
+    logger.info(f"Values - Client ID: {client_id}, Secret: {'***' if client_secret else None}, Env: {environment}")
+    
+    if not client_id or not client_secret:
+        logger.warning("Missing credentials")
+        return create_error_page("Please enter both Client ID and Client Secret.")
+    
+    # Store credentials
+    credential_manager = CredentialManager()
+    credentials = {
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'environment': environment if environment else 'sandbox'
+    }
+    
+    if credential_manager.store_credentials(credentials):
+        logger.info("Credentials saved successfully - showing welcome page")
+        return create_welcome_page()
+    else:
+        logger.error("Failed to save credentials")
+        return create_error_page("Failed to save credentials. Please try again.")
+
+# Callback to handle Test Setup button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("test-setup-btn", "n_clicks"),
+    State("setup-client-id", "value"),
+    State("setup-client-secret", "value"),
+    State("setup-environment", "value"),
+    prevent_initial_call=True
+)
+def test_setup(n_clicks, client_id, client_secret, environment):
+    """Handle Test Setup button click"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Test setup button clicked")
+    
+    if not client_id or not client_secret:
+        return create_error_page("Please enter both Client ID and Client Secret to test.")
+    
+    # Test credentials by trying to create OAuth URL
+    try:
+        state = secrets.token_urlsafe(32)
+        auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
+        
+        return html.Div([
+            html.Div([
+                html.H2("Setup Test Successful", style={'textAlign': 'center', 'color': '#27ae60', 'marginBottom': '20px'}),
+                html.Div([
+                    html.P("Your credentials are valid! You can now save them and connect to QuickBooks.", 
+                           style={'color': '#155724', 'textAlign': 'center', 'padding': '15px', 
+                                  'backgroundColor': '#d4edda', 'borderRadius': '4px', 'borderLeft': '4px solid #28a745'}),
+                    html.Button("← Back to Setup", id="back-to-setup-btn",
+                               style={'backgroundColor': '#6c757d', 'color': 'white', 'border': 'none', 
+                                      'padding': '10px 20px', 'borderRadius': '4px', 'cursor': 'pointer', 
+                                      'fontSize': '14px', 'fontWeight': 'bold', 'display': 'block', 
+                                      'margin': '20px auto'})
+                ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
+            ], style={'maxWidth': '600px', 'margin': '0 auto'})
+        ])
+    except Exception as e:
+        return create_error_page(f"Test failed: {str(e)}")
+
+# Callback to handle Connect to QuickBooks button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("connect-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def connect_to_quickbooks(n_clicks):
+    """Handle Connect to QuickBooks button click"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Connect to QuickBooks button clicked")
+    
+    try:
+        # Get stored credentials
+        credential_manager = CredentialManager()
+        credentials = credential_manager.get_credentials()
+        
+        if not credentials:
+            return create_error_page("No credentials found. Please set up your QuickBooks app credentials first.")
+        
+        # Start OAuth flow
+        client_id = credentials.get('client_id')
+        environment = credentials.get('environment', 'sandbox')
+        
+        # Generate OAuth URL with state parameter for security
+        state = secrets.token_urlsafe(32)
+        auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
+        
+        return create_oauth_page(auth_url, environment)
+        
+    except Exception as e:
+        logger.error(f"Error starting OAuth flow: {e}")
+        return create_error_page(f"Error starting QuickBooks connection: {str(e)}")
+
+# Callback to handle Reset Setup button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("reset-setup-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def reset_setup(n_clicks):
+    """Handle Reset Setup button click"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Reset setup button clicked")
+    
+    try:
+        # Clear keyring credentials
+        credential_manager = CredentialManager()
+        credential_manager.clear_credentials()
+        credential_manager.clear_tokens()
+        
+        # Also remove temporary file if it exists
+        if os.path.exists('temp_credentials.json'):
+            os.remove('temp_credentials.json')
+            logger.info("Temporary credentials file deleted")
+        
+        logger.info("All credentials cleared successfully")
+        return create_setup_page()
+    except Exception as e:
+        logger.error(f"Failed to clear credentials: {e}")
         return create_setup_page()
 
 # OAuth callback route handler
@@ -440,11 +404,8 @@ def exchange_code_for_token(code, credentials):
         client_secret = credentials['client_secret']
         environment = credentials.get('environment', 'sandbox')
         
-        # Determine the token endpoint based on environment
-        if environment == 'production':
-            token_url = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
-        else:
-            token_url = "https://sandbox-quickbooks.api.intuit.com/oauth2/v1/tokens/bearer"
+        # Token endpoint is the same for both environments
+        token_url = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
         
         # Prepare the request
         headers = {
@@ -477,7 +438,11 @@ def exchange_code_for_token(code, credentials):
 def fetch_company_info(access_token, realm_id):
     """Fetch company information from QuickBooks"""
     try:
-        environment = 'sandbox'  # You might want to get this from stored credentials
+        # Get environment from stored credentials
+        credential_manager = CredentialManager()
+        credentials = credential_manager.get_credentials()
+        environment = credentials.get('environment', 'sandbox') if credentials else 'sandbox'
+        
         if environment == 'production':
             base_url = "https://quickbooks.api.intuit.com"
         else:
@@ -494,7 +459,7 @@ def fetch_company_info(access_token, realm_id):
         
         if response.status_code == 200:
             company_data = response.json()
-            return company_data.get('QueryResponse', {}).get('CompanyInfo', [{}])[0]
+            return company_data.get('CompanyInfo')
         else:
             logger.error(f"Failed to fetch company info: {response.status_code}")
             return None
@@ -511,6 +476,8 @@ if __name__ == '__main__':
     
     if not check_credentials():
         logger.info("No credentials found - setup page will be shown")
+    else:
+        logger.info("Credentials found - welcome page will be shown")
     
     logger.info("Starting QBO Sankey Dashboard")
     app.run(debug=True, host='127.0.0.1', port=8050)
