@@ -17,6 +17,7 @@ import requests
 from flask import request, redirect
 from utils.logging_config import setup_logging
 from utils.credentials import CredentialManager
+from dashboard import create_dashboard_page, create_success_page
 
 # Initialize logging
 logger = setup_logging()
@@ -106,20 +107,6 @@ def create_welcome_page():
         ], style={'maxWidth': '600px', 'margin': '0 auto'})
     ], id='welcome-page-container')
 
-def create_success_page():
-    """Create the success page after OAuth"""
-    return html.Div([
-        html.Div([
-            html.H2("Authentication Successful!", style={'textAlign': 'center', 'color': '#27ae60', 'marginBottom': '20px'}),
-            html.Div([
-                html.P("You have successfully connected to QuickBooks Online. Your dashboard is ready!", 
-                       style={'color': '#155724', 'textAlign': 'center', 'padding': '15px', 
-                              'backgroundColor': '#d4edda', 'borderRadius': '4px', 'borderLeft': '4px solid #28a745'}),
-                html.P("Dashboard features coming soon...", 
-                       style={'color': '#7f8c8d', 'textAlign': 'center', 'fontSize': '14px', 'marginTop': '20px'})
-            ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-        ], style={'maxWidth': '600px', 'margin': '0 auto'})
-    ], id='success-page-container')
 
 def create_error_page(message):
     """Create an error page with a custom message"""
@@ -207,148 +194,11 @@ def handle_url_changes(search):
     
     return dash.no_update
 
-# Callback to handle Save Credentials button
-@app.callback(
-    Output("main-content", "children", allow_duplicate=True),
-    Input("save-credentials-btn", "n_clicks"),
-    State("setup-client-id", "value"),
-    State("setup-client-secret", "value"),
-    State("setup-environment", "value"),
-    prevent_initial_call=True
-)
-def save_credentials(n_clicks, client_id, client_secret, environment):
-    """Handle Save Credentials button click"""
-    if not n_clicks:
-        return dash.no_update
-    
-    logger.info("Save credentials button clicked")
-    logger.info(f"Values - Client ID: {client_id}, Secret: {'***' if client_secret else None}, Env: {environment}")
-    
-    if not client_id or not client_secret:
-        logger.warning("Missing credentials")
-        return create_error_page("Please enter both Client ID and Client Secret.")
-    
-    # Store credentials
-    credential_manager = CredentialManager()
-    credentials = {
-        'client_id': client_id,
-        'client_secret': client_secret,
-        'environment': environment if environment else 'sandbox'
-    }
-    
-    if credential_manager.store_credentials(credentials):
-        logger.info("Credentials saved successfully - showing welcome page")
-        return create_welcome_page()
-    else:
-        logger.error("Failed to save credentials")
-        return create_error_page("Failed to save credentials. Please try again.")
+# Individual callbacks removed - handled by consolidated callback below
 
-# Callback to handle Test Setup button
-@app.callback(
-    Output("main-content", "children", allow_duplicate=True),
-    Input("test-setup-btn", "n_clicks"),
-    State("setup-client-id", "value"),
-    State("setup-client-secret", "value"),
-    State("setup-environment", "value"),
-    prevent_initial_call=True
-)
-def test_setup(n_clicks, client_id, client_secret, environment):
-    """Handle Test Setup button click"""
-    if not n_clicks:
-        return dash.no_update
-    
-    logger.info("Test setup button clicked")
-    
-    if not client_id or not client_secret:
-        return create_error_page("Please enter both Client ID and Client Secret to test.")
-    
-    # Test credentials by trying to create OAuth URL
-    try:
-        state = secrets.token_urlsafe(32)
-        auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
-        
-        return html.Div([
-            html.Div([
-                html.H2("Setup Test Successful", style={'textAlign': 'center', 'color': '#27ae60', 'marginBottom': '20px'}),
-                html.Div([
-                    html.P("Your credentials are valid! You can now save them and connect to QuickBooks.", 
-                           style={'color': '#155724', 'textAlign': 'center', 'padding': '15px', 
-                                  'backgroundColor': '#d4edda', 'borderRadius': '4px', 'borderLeft': '4px solid #28a745'}),
-                    html.Button("← Back to Setup", id="back-to-setup-btn",
-                               style={'backgroundColor': '#6c757d', 'color': 'white', 'border': 'none', 
-                                      'padding': '10px 20px', 'borderRadius': '4px', 'cursor': 'pointer', 
-                                      'fontSize': '14px', 'fontWeight': 'bold', 'display': 'block', 
-                                      'margin': '20px auto'})
-                ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-            ], style={'maxWidth': '600px', 'margin': '0 auto'})
-        ])
-    except Exception as e:
-        return create_error_page(f"Test failed: {str(e)}")
+# Test Setup callback removed - handled by consolidated callback below
 
-# Callback to handle Connect to QuickBooks button
-@app.callback(
-    Output("main-content", "children", allow_duplicate=True),
-    Input("connect-btn", "n_clicks"),
-    prevent_initial_call=True
-)
-def connect_to_quickbooks(n_clicks):
-    """Handle Connect to QuickBooks button click"""
-    if not n_clicks:
-        return dash.no_update
-    
-    logger.info("Connect to QuickBooks button clicked")
-    
-    try:
-        # Get stored credentials
-        credential_manager = CredentialManager()
-        credentials = credential_manager.get_credentials()
-        
-        if not credentials:
-            return create_error_page("No credentials found. Please set up your QuickBooks app credentials first.")
-        
-        # Start OAuth flow
-        client_id = credentials.get('client_id')
-        environment = credentials.get('environment', 'sandbox')
-        
-        # Generate OAuth URL with state parameter for security
-        state = secrets.token_urlsafe(32)
-        auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
-        
-        return create_oauth_page(auth_url, environment)
-        
-    except Exception as e:
-        logger.error(f"Error starting OAuth flow: {e}")
-        return create_error_page(f"Error starting QuickBooks connection: {str(e)}")
-
-# Callback to handle Reset Setup button
-@app.callback(
-    Output("main-content", "children", allow_duplicate=True),
-    Input("reset-setup-btn", "n_clicks"),
-    prevent_initial_call=True
-)
-def reset_setup(n_clicks):
-    """Handle Reset Setup button click"""
-    if not n_clicks:
-        return dash.no_update
-    
-    logger.info("Reset setup button clicked")
-    
-    try:
-        # Clear keyring credentials
-        credential_manager = CredentialManager()
-        credential_manager.clear_credentials()
-        credential_manager.clear_tokens()
-        
-        # Also remove temporary file if it exists
-        if os.path.exists('temp_credentials.json'):
-            os.remove('temp_credentials.json')
-            logger.info("Temporary credentials file deleted")
-        
-        logger.info("All credentials cleared successfully")
-        return create_setup_page()
-    except Exception as e:
-        logger.error(f"Failed to clear credentials: {e}")
-        return create_setup_page()
+# Connect and Reset callbacks removed - handled by consolidated callback below
 
 # OAuth callback route handler
 @app.server.route('/callback')
@@ -467,6 +317,143 @@ def fetch_company_info(access_token, realm_id):
     except Exception as e:
         logger.error(f"Error fetching company info: {e}")
         return None
+
+# Single callback to handle all button interactions
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    [Input("view-dashboard-btn", "n_clicks"),
+     Input("refresh-data-btn", "n_clicks"),
+     Input("export-data-btn", "n_clicks"),
+     Input("back-to-setup-btn", "n_clicks"),
+     Input("save-credentials-btn", "n_clicks"),
+     Input("test-setup-btn", "n_clicks"),
+     Input("reset-setup-btn", "n_clicks"),
+     Input("connect-btn", "n_clicks")],
+    [State("setup-client-id", "value"),
+     State("setup-client-secret", "value"),
+     State("setup-environment", "value")],
+    prevent_initial_call=True,
+    suppress_callback_exceptions=True
+)
+def handle_all_buttons(view_clicks, refresh_clicks, export_clicks, back_clicks, 
+                      save_clicks, test_clicks, reset_clicks, connect_clicks,
+                      client_id, client_secret, environment):
+    """Handle all button clicks - only responds to buttons that actually exist and were clicked"""
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return dash.no_update
+    
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    
+    # Only respond to buttons that were actually clicked (not None)
+    clicked_value = ctx.triggered[0]['value']
+    if clicked_value is None:
+        return dash.no_update
+    
+    # Dashboard buttons
+    if trigger_id == 'view-dashboard-btn' and view_clicks:
+        logger.info("View Dashboard button clicked")
+        return create_dashboard_page()
+    
+    elif trigger_id == 'refresh-data-btn' and refresh_clicks:
+        logger.info("Refresh Data button clicked")
+        return create_dashboard_page()
+    
+    elif trigger_id == 'export-data-btn' and export_clicks:
+        logger.info("Export Data button clicked")
+        return create_dashboard_page()
+    
+    elif trigger_id == 'back-to-setup-btn' and back_clicks:
+        logger.info("Back to Setup button clicked")
+        return create_setup_page()
+    
+    # Setup buttons
+    elif trigger_id == 'save-credentials-btn' and save_clicks:
+        logger.info("Save credentials button clicked")
+        if not client_id or not client_secret:
+            return create_error_page("Please enter both Client ID and Client Secret.")
+        
+        credential_manager = CredentialManager()
+        credentials = {
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'environment': environment if environment else 'sandbox'
+        }
+        
+        if credential_manager.store_credentials(credentials):
+            logger.info("Credentials saved successfully - showing welcome page")
+            return create_welcome_page()
+        else:
+            logger.error("Failed to save credentials")
+            return create_error_page("Failed to save credentials. Please try again.")
+    
+    elif trigger_id == 'test-setup-btn' and test_clicks:
+        logger.info("Test setup button clicked")
+        if not client_id or not client_secret:
+            return create_error_page("Please enter both Client ID and Client Secret to test.")
+        
+        try:
+            state = secrets.token_urlsafe(32)
+            auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
+            
+            return html.Div([
+                html.Div([
+                    html.H2("Setup Test Successful", style={'textAlign': 'center', 'color': '#27ae60', 'marginBottom': '20px'}),
+                    html.Div([
+                        html.P("Your credentials are valid! You can now save them and connect to QuickBooks.", 
+                               style={'color': '#155724', 'textAlign': 'center', 'padding': '15px', 
+                                      'backgroundColor': '#d4edda', 'borderRadius': '4px', 'borderLeft': '4px solid #28a745'}),
+                        html.Button("← Back to Setup", id="back-to-setup-btn",
+                                   style={'backgroundColor': '#6c757d', 'color': 'white', 'border': 'none', 
+                                          'padding': '10px 20px', 'borderRadius': '4px', 'cursor': 'pointer', 
+                                          'fontSize': '14px', 'fontWeight': 'bold', 'display': 'block', 
+                                          'margin': '20px auto'})
+                    ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
+                ], style={'maxWidth': '600px', 'margin': '0 auto'})
+            ])
+        except Exception as e:
+            return create_error_page(f"Test failed: {str(e)}")
+    
+    elif trigger_id == 'reset-setup-btn' and reset_clicks:
+        logger.info("Reset setup button clicked")
+        try:
+            credential_manager = CredentialManager()
+            credential_manager.clear_credentials()
+            credential_manager.clear_tokens()
+            
+            if os.path.exists('temp_credentials.json'):
+                os.remove('temp_credentials.json')
+                logger.info("Temporary credentials file deleted")
+            
+            logger.info("All credentials cleared successfully")
+            return create_setup_page()
+        except Exception as e:
+            logger.error(f"Failed to clear credentials: {e}")
+            return create_setup_page()
+    
+    # Welcome button
+    elif trigger_id == 'connect-btn' and connect_clicks:
+        logger.info("Connect to QuickBooks button clicked")
+        try:
+            credential_manager = CredentialManager()
+            credentials = credential_manager.get_credentials()
+            
+            if not credentials:
+                return create_error_page("No credentials found. Please set up your QuickBooks app credentials first.")
+            
+            client_id = credentials.get('client_id')
+            environment = credentials.get('environment', 'sandbox')
+            
+            state = secrets.token_urlsafe(32)
+            auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
+            
+            return create_oauth_page(auth_url, environment)
+            
+        except Exception as e:
+            logger.error(f"Error starting OAuth flow: {e}")
+            return create_error_page(f"Error starting QuickBooks connection: {str(e)}")
+    
+    return dash.no_update
 
 if __name__ == '__main__':
     logger.info("=" * 50)
