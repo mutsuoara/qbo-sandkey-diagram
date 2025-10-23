@@ -133,19 +133,63 @@ app.layout = html.Div([
 ], style={'fontFamily': 'Arial, sans-serif', 'minHeight': '100vh', 'backgroundColor': '#f5f5f5'})
 
 # Callback for setup page buttons only
+# Combined callback for all page interactions
 @app.callback(
     Output("main-content", "children"),
-    [Input("save-credentials-btn", "n_clicks"), Input("test-setup-btn", "n_clicks")],
-    [State("setup-client-id", "value"), State("setup-client-secret", "value"), State("setup-environment", "value")],
+    [
+        Input("url", "search"), 
+        Input("url", "pathname"),
+        Input("save-credentials-btn", "n_clicks"),
+        Input("test-setup-btn", "n_clicks"),
+        Input("connect-btn", "n_clicks"),
+        Input("reset-setup-btn", "n_clicks")
+    ],
+    [
+        State("setup-client-id", "value"),
+        State("setup-client-secret", "value"),
+        State("setup-environment", "value")
+    ],
     prevent_initial_call=False,
     suppress_callback_exceptions=True
 )
-def handle_setup_interactions(save_clicks, test_clicks, client_id, client_secret, environment):
-    """Handle setup page button clicks"""
+def handle_all_interactions(search, pathname, save_clicks, test_clicks, connect_clicks, reset_clicks, 
+                           client_id, client_secret, environment):
+    """Handle all page interactions"""
     global is_authenticated, company_info
     
+    ctx = dash.callback_context
+    
+    # Initial load - no trigger
+    if not ctx.triggered:
+        if not check_credentials():
+            return create_setup_page()
+        return create_welcome_page()
+    
+    # Determine what triggered the callback
+    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
+    
+    # Handle OAuth callback success/error from URL
+    if triggered_id == "url":
+        if search and 'auth=success' in search:
+            logger.info("OAuth success detected")
+            is_authenticated = True
+            return create_success_page()
+        
+        if search and 'auth=error' in search:
+            logger.info("OAuth error detected")
+            return html.Div([
+                html.Div([
+                    html.H2("Authentication Failed", style={'textAlign': 'center', 'color': '#e74c3c', 'marginBottom': '20px'}),
+                    html.Div([
+                        html.P("OAuth authentication failed. Please try again.", 
+                               style={'color': '#e74c3c', 'textAlign': 'center', 'padding': '15px', 
+                                      'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'})
+                    ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
+                ], style={'maxWidth': '600px', 'margin': '0 auto'})
+            ])
+    
     # Handle Save Credentials button
-    if save_clicks:
+    if triggered_id == "save-credentials-btn" and save_clicks:
         logger.info("Save credentials button clicked")
         if not client_id or not client_secret:
             return html.Div([
@@ -154,16 +198,11 @@ def handle_setup_interactions(save_clicks, test_clicks, client_id, client_secret
                     html.Div([
                         html.P("Please enter both Client ID and Client Secret.", 
                                style={'color': '#e74c3c', 'textAlign': 'center', 'padding': '15px', 
-                                      'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'}),
-                        html.Button("Back to Setup", id="back-to-setup-btn", 
-                                   style={'backgroundColor': '#3498db', 'color': 'white', 'border': 'none', 
-                                          'padding': '12px 24px', 'borderRadius': '4px', 'cursor': 'pointer', 
-                                          'fontSize': '14px', 'fontWeight': 'bold', 'display': 'block', 'margin': '20px auto'})
+                                      'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'})
                     ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
                 ], style={'maxWidth': '600px', 'margin': '0 auto'})
             ])
         
-        # Store credentials
         credential_manager = CredentialManager()
         credentials = {
             'client_id': client_id,
@@ -187,7 +226,7 @@ def handle_setup_interactions(save_clicks, test_clicks, client_id, client_secret
             ])
     
     # Handle Test Setup button
-    if test_clicks:
+    if triggered_id == "test-setup-btn" and test_clicks:
         logger.info("Test setup button clicked")
         if not client_id or not client_secret:
             return html.Div([
@@ -201,7 +240,6 @@ def handle_setup_interactions(save_clicks, test_clicks, client_id, client_secret
                 ], style={'maxWidth': '600px', 'margin': '0 auto'})
             ])
         
-        # Test credentials by trying to create OAuth URL
         try:
             state = secrets.token_urlsafe(32)
             auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
@@ -228,45 +266,10 @@ def handle_setup_interactions(save_clicks, test_clicks, client_id, client_secret
                 ], style={'maxWidth': '600px', 'margin': '0 auto'})
             ])
     
-    # Default: show setup page
-    return create_setup_page()
-
-# Callback for welcome page buttons
-@app.callback(
-    Output("main-content", "children"),
-    [Input("url", "search"), Input("url", "pathname"), Input("connect-btn", "n_clicks"), Input("reset-setup-btn", "n_clicks")],
-    prevent_initial_call=False,
-    suppress_callback_exceptions=True
-)
-def handle_welcome_interactions(search, pathname, connect_clicks, reset_clicks):
-    """Handle welcome page button clicks"""
-    global is_authenticated, company_info
-    
-    # Check for OAuth callback success
-    if search and 'auth=success' in search:
-        logger.info("OAuth success detected")
-        is_authenticated = True
-        return create_success_page()
-    
-    # Check for OAuth callback error
-    if search and 'auth=error' in search:
-        logger.info("OAuth error detected")
-        return html.Div([
-            html.Div([
-                html.H2("Authentication Failed", style={'textAlign': 'center', 'color': '#e74c3c', 'marginBottom': '20px'}),
-                html.Div([
-                    html.P("OAuth authentication failed. Please try again.", 
-                           style={'color': '#e74c3c', 'textAlign': 'center', 'padding': '15px', 
-                                  'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'})
-                ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-            ], style={'maxWidth': '600px', 'margin': '0 auto'})
-        ])
-    
     # Handle Connect to QuickBooks button
-    if connect_clicks:
+    if triggered_id == "connect-btn" and connect_clicks:
         logger.info("Connect to QuickBooks button clicked")
         try:
-            # Get stored credentials
             credential_manager = CredentialManager()
             credentials = credential_manager.get_credentials()
             
@@ -282,11 +285,9 @@ def handle_welcome_interactions(search, pathname, connect_clicks, reset_clicks):
                     ], style={'maxWidth': '600px', 'margin': '0 auto'})
                 ])
             
-            # Start OAuth flow
             client_id = credentials.get('client_id')
             environment = credentials.get('environment', 'sandbox')
             
-            # Generate OAuth URL with state parameter for security
             state = secrets.token_urlsafe(32)
             auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
             
@@ -328,15 +329,13 @@ def handle_welcome_interactions(search, pathname, connect_clicks, reset_clicks):
             ])
     
     # Handle Reset Setup button
-    if reset_clicks:
+    if triggered_id == "reset-setup-btn" and reset_clicks:
         logger.info("Reset setup button clicked")
         try:
-            # Clear keyring credentials
             credential_manager = CredentialManager()
             credential_manager.clear_credentials()
             credential_manager.clear_tokens()
             
-            # Also remove temporary file if it exists
             if os.path.exists('temp_credentials.json'):
                 os.remove('temp_credentials.json')
                 logger.info("Temporary credentials file deleted")
@@ -347,9 +346,11 @@ def handle_welcome_interactions(search, pathname, connect_clicks, reset_clicks):
             logger.error(f"Failed to clear credentials: {e}")
             return create_setup_page()
     
-    # Default: show welcome page
+    # Default: show appropriate page based on credentials
+    if not check_credentials():
+        return create_setup_page()
     return create_welcome_page()
-
+    
 # OAuth callback route handler
 @app.server.route('/callback')
 def oauth_callback():
