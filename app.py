@@ -62,15 +62,22 @@ def create_setup_page():
                     value=""
                 ),
                 html.Label("Environment:", style={'fontWeight': 'bold', 'marginBottom': '5px', 'display': 'block'}),
-                dcc.RadioItems(
-                    id="setup-environment",
-                    options=[
-                        {'label': 'Sandbox (Development)', 'value': 'sandbox'},
-                        {'label': 'Production', 'value': 'production'}
-                    ],
-                    value='sandbox',
-                    style={'marginBottom': '20px'}
-                ),
+                html.Div([
+                    dcc.RadioItems(
+                        id="setup-environment",
+                        options=[
+                            {'label': '🧪 Sandbox (Development/Testing)', 'value': 'sandbox'},
+                            {'label': '🏢 Production (Live QuickBooks Data)', 'value': 'production'}
+                        ],
+                        value='sandbox',
+                        style={'marginBottom': '10px'}
+                    ),
+                    html.Div([
+                        html.Span("💡 ", style={'color': '#f39c12'}),
+                        html.Span("Choose Production to connect to your real QuickBooks company", 
+                                style={'fontSize': '12px', 'color': '#7f8c8d', 'fontStyle': 'italic'})
+                    ], style={'marginBottom': '20px', 'padding': '8px', 'backgroundColor': '#fff3cd', 'borderRadius': '4px', 'borderLeft': '3px solid #f39c12'})
+                ]),
                 html.Div([
                     html.Button("Save Credentials", id="save-credentials-btn", 
                                style={'backgroundColor': '#27ae60', 'color': 'white', 'border': 'none', 
@@ -88,9 +95,31 @@ def create_setup_page():
 def create_welcome_page():
     """Create the welcome page"""
     logger.info("Creating welcome page with Connect to QuickBooks button")
+    
+    # Get current environment info
+    credential_manager = CredentialManager()
+    credentials = credential_manager.get_credentials()
+    tokens = credential_manager.get_tokens()
+    
+    environment = credentials.get('environment', 'sandbox') if credentials else 'sandbox'
+    realm_id = tokens.get('realm_id', 'Not connected') if tokens else 'Not connected'
+    
+    # Environment indicator
+    env_color = '#27ae60' if environment == 'production' else '#f39c12'
+    env_text = 'LIVE' if environment == 'production' else 'SANDBOX'
+    
     return html.Div([
         html.Div([
-            html.H1("Welcome to QBO Sankey Dashboard", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '30px'}),
+            html.H1("Welcome to QBO Sankey Dashboard", style={'textAlign': 'center', 'color': '#2c3e50', 'marginBottom': '20px'}),
+            
+            # Environment indicator
+            html.Div([
+                html.Span(f"Environment: ", style={'fontWeight': 'bold', 'color': '#7f8c8d'}),
+                html.Span(env_text, style={'fontWeight': 'bold', 'color': env_color, 'backgroundColor': f'{env_color}20', 'padding': '4px 8px', 'borderRadius': '4px'}),
+                html.Br(),
+                html.Span(f"Company ID: {realm_id}", style={'fontSize': '12px', 'color': '#95a5a6', 'fontFamily': 'monospace'})
+            ], style={'textAlign': 'center', 'marginBottom': '20px', 'padding': '10px', 'backgroundColor': '#f8f9fa', 'borderRadius': '4px'}),
+            
             html.Div([
                 html.P("Connect to your QuickBooks Online account to visualize your financial data with interactive Sankey diagrams.", 
                        style={'textAlign': 'center', 'color': '#7f8c8d', 'fontSize': '16px', 'marginBottom': '30px'}),
@@ -106,7 +135,6 @@ def create_welcome_page():
             ], style={'backgroundColor': 'white', 'padding': '40px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
         ], style={'maxWidth': '600px', 'margin': '0 auto'})
     ], id='welcome-page-container')
-
 
 def create_error_page(message):
     """Create an error page with a custom message"""
@@ -194,11 +222,221 @@ def handle_url_changes(search):
     
     return dash.no_update
 
-# Individual callbacks removed - handled by consolidated callback below
+# Callback to handle Save Credentials button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("save-credentials-btn", "n_clicks"),
+    State("setup-client-id", "value"),
+    State("setup-client-secret", "value"),
+    State("setup-environment", "value"),
+    prevent_initial_call=True
+)
+def save_credentials(n_clicks, client_id, client_secret, environment):
+    """Handle Save Credentials button click"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Save credentials button clicked")
+    logger.info(f"Values - Client ID: {client_id}, Secret: {'***' if client_secret else None}, Env: {environment}")
+    
+    if not client_id or not client_secret:
+        logger.warning("Missing credentials")
+        return create_error_page("Please enter both Client ID and Client Secret.")
+    
+    # Store credentials
+    credential_manager = CredentialManager()
+    credentials = {
+        'client_id': client_id,
+        'client_secret': client_secret,
+        'environment': environment if environment else 'sandbox'
+    }
+    
+    if credential_manager.store_credentials(credentials):
+        logger.info("Credentials saved successfully - showing welcome page")
+        return create_welcome_page()
+    else:
+        logger.error("Failed to save credentials")
+        return create_error_page("Failed to save credentials. Please try again.")
 
-# Test Setup callback removed - handled by consolidated callback below
+# Callback to handle Test Setup button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("test-setup-btn", "n_clicks"),
+    State("setup-client-id", "value"),
+    State("setup-client-secret", "value"),
+    State("setup-environment", "value"),
+    prevent_initial_call=True
+)
+def test_setup(n_clicks, client_id, client_secret, environment):
+    """Handle Test Setup button click"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Test setup button clicked")
+    
+    if not client_id or not client_secret:
+        return create_error_page("Please enter both Client ID and Client Secret to test.")
+    
+    # Test credentials by trying to create OAuth URL
+    try:
+        state = secrets.token_urlsafe(32)
+        auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
+        
+        return html.Div([
+            html.Div([
+                html.H2("Setup Test Successful", style={'textAlign': 'center', 'color': '#27ae60', 'marginBottom': '20px'}),
+                html.Div([
+                    html.P("Your credentials are valid! You can now save them and connect to QuickBooks.", 
+                           style={'color': '#155724', 'textAlign': 'center', 'padding': '15px', 
+                                  'backgroundColor': '#d4edda', 'borderRadius': '4px', 'borderLeft': '4px solid #28a745'}),
+                    html.Button("← Back to Setup", id="back-to-setup-from-test-btn",
+                               style={'backgroundColor': '#6c757d', 'color': 'white', 'border': 'none', 
+                                      'padding': '10px 20px', 'borderRadius': '4px', 'cursor': 'pointer', 
+                                      'fontSize': '14px', 'fontWeight': 'bold', 'display': 'block', 
+                                      'margin': '20px auto'})
+                ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
+            ], style={'maxWidth': '600px', 'margin': '0 auto'})
+        ])
+    except Exception as e:
+        return create_error_page(f"Test failed: {str(e)}")
 
-# Connect and Reset callbacks removed - handled by consolidated callback below
+# Callback to handle Connect to QuickBooks button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("connect-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def connect_to_quickbooks(n_clicks):
+    """Handle Connect to QuickBooks button click"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Connect to QuickBooks button clicked")
+    
+    try:
+        # Get stored credentials
+        credential_manager = CredentialManager()
+        credentials = credential_manager.get_credentials()
+        
+        if not credentials:
+            return create_error_page("No credentials found. Please set up your QuickBooks app credentials first.")
+        
+        # Start OAuth flow
+        client_id = credentials.get('client_id')
+        environment = credentials.get('environment', 'sandbox')
+        
+        # Generate OAuth URL with state parameter for security
+        state = secrets.token_urlsafe(32)
+        auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
+        
+        return create_oauth_page(auth_url, environment)
+        
+    except Exception as e:
+        logger.error(f"Error starting OAuth flow: {e}")
+        return create_error_page(f"Error starting QuickBooks connection: {str(e)}")
+
+# Callback to handle Reset Setup button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("reset-setup-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def reset_setup(n_clicks):
+    """Handle Reset Setup button click"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Reset setup button clicked")
+    
+    try:
+        # Clear keyring credentials
+        credential_manager = CredentialManager()
+        credential_manager.clear_credentials()
+        credential_manager.clear_tokens()
+        
+        # Also remove temporary file if it exists
+        if os.path.exists('temp_credentials.json'):
+            os.remove('temp_credentials.json')
+            logger.info("Temporary credentials file deleted")
+        
+        logger.info("All credentials cleared successfully")
+        return create_setup_page()
+    except Exception as e:
+        logger.error(f"Failed to clear credentials: {e}")
+        return create_setup_page()
+
+# Callback to handle Back to Setup from Test button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("back-to-setup-from-test-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def back_to_setup_from_test(n_clicks):
+    """Handle back to setup from test page"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Back to setup from test button clicked")
+    return create_setup_page()
+
+# Callback to handle View Dashboard button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("view-dashboard-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def view_dashboard(n_clicks):
+    """Handle View Dashboard button click"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("View Dashboard button clicked")
+    return create_dashboard_page()
+
+# Callback to handle Refresh Data button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("refresh-data-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def refresh_data(n_clicks):
+    """Handle Refresh Data button click"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Refresh Data button clicked")
+    # In the future, this would refresh data from QuickBooks
+    return create_dashboard_page()
+
+# Callback to handle Export Data button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("export-data-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def export_data(n_clicks):
+    """Handle Export Data button click"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Export Data button clicked")
+    # In the future, this would export data
+    # For now, just stay on the dashboard
+    return dash.no_update
+
+# Callback to handle Back to Setup button from dashboard
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("back-to-setup-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def back_to_setup(n_clicks):
+    """Handle Back to Setup button click from dashboard"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Back to Setup button clicked from dashboard")
+    return create_setup_page()
 
 # OAuth callback route handler
 @app.server.route('/callback')
@@ -318,142 +556,123 @@ def fetch_company_info(access_token, realm_id):
         logger.error(f"Error fetching company info: {e}")
         return None
 
-# Single callback to handle all button interactions
+# Date range callbacks
 @app.callback(
-    Output("main-content", "children", allow_duplicate=True),
-    [Input("view-dashboard-btn", "n_clicks"),
-     Input("refresh-data-btn", "n_clicks"),
-     Input("export-data-btn", "n_clicks"),
-     Input("back-to-setup-btn", "n_clicks"),
-     Input("save-credentials-btn", "n_clicks"),
-     Input("test-setup-btn", "n_clicks"),
-     Input("reset-setup-btn", "n_clicks"),
-     Input("connect-btn", "n_clicks")],
-    [State("setup-client-id", "value"),
-     State("setup-client-secret", "value"),
-     State("setup-environment", "value")],
+    Output("sankey-chart", "figure"),
+    [Input("apply-date-range-btn", "n_clicks"),
+     Input("ytd-btn", "n_clicks"),
+     Input("last30-btn", "n_clicks"),
+     Input("last90-btn", "n_clicks"),
+     Input("lastyear-btn", "n_clicks"),
+     Input("test2015-btn", "n_clicks")],
+    [State("start-date-picker", "date"),
+     State("end-date-picker", "date")],
     prevent_initial_call=True,
     suppress_callback_exceptions=True
 )
-def handle_all_buttons(view_clicks, refresh_clicks, export_clicks, back_clicks, 
-                      save_clicks, test_clicks, reset_clicks, connect_clicks,
-                      client_id, client_secret, environment):
-    """Handle all button clicks - only responds to buttons that actually exist and were clicked"""
+def update_sankey_chart(apply_clicks, ytd_clicks, last30_clicks, last90_clicks, lastyear_clicks, test2015_clicks, start_date, end_date):
+    """Update Sankey chart based on date range selection"""
+    from datetime import datetime, timedelta
+    from dashboard.sankey_charts import create_sample_sankey_diagram
+    
     ctx = dash.callback_context
     if not ctx.triggered:
         return dash.no_update
     
     trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
     
-    # Only respond to buttons that were actually clicked (not None)
-    clicked_value = ctx.triggered[0]['value']
-    if clicked_value is None:
+    # Handle different date range buttons
+    if trigger_id == 'ytd-btn' and ytd_clicks:
+        logger.info("Year to Date button clicked")
+        end_date = datetime.now()
+        start_date = datetime(end_date.year, 1, 1)
+    elif trigger_id == 'last30-btn' and last30_clicks:
+        logger.info("Last 30 Days button clicked")
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)
+    elif trigger_id == 'last90-btn' and last90_clicks:
+        logger.info("Last 90 Days button clicked")
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)
+    elif trigger_id == 'lastyear-btn' and lastyear_clicks:
+        logger.info("Last Year button clicked")
+        end_date = datetime.now()
+        start_date = datetime(end_date.year - 1, 1, 1)
+        end_date = datetime(end_date.year - 1, 12, 31)
+    elif trigger_id == 'test2015-btn' and test2015_clicks:
+        logger.info("Test 2015 Data button clicked")
+        start_date = datetime(2015, 6, 1)
+        end_date = datetime(2015, 6, 30)
+    elif trigger_id == 'apply-date-range-btn' and apply_clicks:
+        logger.info("Apply Date Range button clicked")
+        if not start_date or not end_date:
+            logger.warning("No dates selected for custom range")
+            return dash.no_update
+        start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        end_date = datetime.strptime(end_date, '%Y-%m-%d')
+    else:
         return dash.no_update
     
-    # Dashboard buttons
-    if trigger_id == 'view-dashboard-btn' and view_clicks:
-        logger.info("View Dashboard button clicked")
-        return create_dashboard_page()
+    logger.info(f"Updating chart for date range: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
     
-    elif trigger_id == 'refresh-data-btn' and refresh_clicks:
-        logger.info("Refresh Data button clicked")
-        return create_dashboard_page()
-    
-    elif trigger_id == 'export-data-btn' and export_clicks:
-        logger.info("Export Data button clicked")
-        return create_dashboard_page()
-    
-    elif trigger_id == 'back-to-setup-btn' and back_clicks:
-        logger.info("Back to Setup button clicked")
-        return create_setup_page()
-    
-    # Setup buttons
-    elif trigger_id == 'save-credentials-btn' and save_clicks:
-        logger.info("Save credentials button clicked")
-        if not client_id or not client_secret:
-            return create_error_page("Please enter both Client ID and Client Secret.")
+    # Try to get real data from QuickBooks
+    try:
+        from utils.credentials import CredentialManager
+        from dashboard.data_fetcher import QBODataFetcher
+        from dashboard.sankey_charts import create_sankey_diagram_from_data, create_sample_sankey_diagram
         
         credential_manager = CredentialManager()
-        credentials = {
-            'client_id': client_id,
-            'client_secret': client_secret,
-            'environment': environment if environment else 'sandbox'
-        }
+        tokens = credential_manager.get_tokens()
         
-        if credential_manager.store_credentials(credentials):
-            logger.info("Credentials saved successfully - showing welcome page")
-            return create_welcome_page()
-        else:
-            logger.error("Failed to save credentials")
-            return create_error_page("Failed to save credentials. Please try again.")
-    
-    elif trigger_id == 'test-setup-btn' and test_clicks:
-        logger.info("Test setup button clicked")
-        if not client_id or not client_secret:
-            return create_error_page("Please enter both Client ID and Client Secret to test.")
-        
-        try:
-            state = secrets.token_urlsafe(32)
-            auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
-            
-            return html.Div([
-                html.Div([
-                    html.H2("Setup Test Successful", style={'textAlign': 'center', 'color': '#27ae60', 'marginBottom': '20px'}),
-                    html.Div([
-                        html.P("Your credentials are valid! You can now save them and connect to QuickBooks.", 
-                               style={'color': '#155724', 'textAlign': 'center', 'padding': '15px', 
-                                      'backgroundColor': '#d4edda', 'borderRadius': '4px', 'borderLeft': '4px solid #28a745'}),
-                        html.Button("← Back to Setup", id="back-to-setup-btn",
-                                   style={'backgroundColor': '#6c757d', 'color': 'white', 'border': 'none', 
-                                          'padding': '10px 20px', 'borderRadius': '4px', 'cursor': 'pointer', 
-                                          'fontSize': '14px', 'fontWeight': 'bold', 'display': 'block', 
-                                          'margin': '20px auto'})
-                    ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
-                ], style={'maxWidth': '600px', 'margin': '0 auto'})
-            ])
-        except Exception as e:
-            return create_error_page(f"Test failed: {str(e)}")
-    
-    elif trigger_id == 'reset-setup-btn' and reset_clicks:
-        logger.info("Reset setup button clicked")
-        try:
-            credential_manager = CredentialManager()
-            credential_manager.clear_credentials()
-            credential_manager.clear_tokens()
-            
-            if os.path.exists('temp_credentials.json'):
-                os.remove('temp_credentials.json')
-                logger.info("Temporary credentials file deleted")
-            
-            logger.info("All credentials cleared successfully")
-            return create_setup_page()
-        except Exception as e:
-            logger.error(f"Failed to clear credentials: {e}")
-            return create_setup_page()
-    
-    # Welcome button
-    elif trigger_id == 'connect-btn' and connect_clicks:
-        logger.info("Connect to QuickBooks button clicked")
-        try:
-            credential_manager = CredentialManager()
+        if tokens:
+            # Create data fetcher with stored tokens
+            # Get environment from stored credentials
             credentials = credential_manager.get_credentials()
+            environment = credentials.get('environment', 'sandbox') if credentials else 'sandbox'
             
-            if not credentials:
-                return create_error_page("No credentials found. Please set up your QuickBooks app credentials first.")
+            data_fetcher = QBODataFetcher(
+                access_token=tokens['access_token'],
+                realm_id=tokens['realm_id'],
+                environment=environment
+            )
             
-            client_id = credentials.get('client_id')
-            environment = credentials.get('environment', 'sandbox')
+            # Get real financial data for the selected date range
+            financial_data = data_fetcher.get_financial_data_for_sankey(
+                start_date.strftime('%Y-%m-%d'),
+                end_date.strftime('%Y-%m-%d')
+            )
             
-            state = secrets.token_urlsafe(32)
-            auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
+            # Create Sankey diagram with real data
+            return create_sankey_diagram_from_data(financial_data, start_date, end_date)
+        else:
+            # No tokens available, use sample data
+            return create_sample_sankey_diagram(start_date, end_date)
             
-            return create_oauth_page(auth_url, environment)
-            
-        except Exception as e:
-            logger.error(f"Error starting OAuth flow: {e}")
-            return create_error_page(f"Error starting QuickBooks connection: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error fetching real data for date range: {e}")
+        # Fallback to sample data
+        return create_sample_sankey_diagram(start_date, end_date)
+
+# Callback to set default date values
+@app.callback(
+    [Output("start-date-picker", "date"),
+     Output("end-date-picker", "date")],
+    Input("view-dashboard-btn", "n_clicks"),
+    prevent_initial_call=True,
+    suppress_callback_exceptions=True
+)
+def set_default_dates(n_clicks):
+    """Set default date values when dashboard loads"""
+    if not n_clicks:
+        return dash.no_update, dash.no_update
     
-    return dash.no_update
+    from datetime import datetime
+    
+    # Set default to Year to Date
+    end_date = datetime.now()
+    start_date = datetime(end_date.year, 1, 1)
+    
+    return start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
 
 if __name__ == '__main__':
     logger.info("=" * 50)

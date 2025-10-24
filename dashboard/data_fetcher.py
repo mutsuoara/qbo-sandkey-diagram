@@ -140,9 +140,24 @@ class QBODataFetcher:
             
             data = self._make_request('reports/ProfitAndLoss', params)
             
-            if data and 'QueryResponse' in data:
+            if data:
                 logger.info("Successfully retrieved Profit and Loss report")
-                return data['QueryResponse']
+                # Log the structure for debugging
+                logger.info(f"P&L Report keys: {list(data.keys())}")
+                if 'Rows' in data:
+                    rows = data['Rows']
+                    logger.info(f"Number of rows: {len(rows) if isinstance(rows, list) else 'Not a list'}")
+                    logger.info(f"Rows type: {type(rows)}")
+                    
+                    # Only try to slice if it's actually a list
+                    if isinstance(rows, list) and len(rows) > 0:
+                        # Log first few rows for debugging (handle case where there might be only 1 row)
+                        rows_to_log = rows[:min(3, len(rows))]
+                        for i, row in enumerate(rows_to_log):
+                            logger.info(f"Row {i} structure: {list(row.keys()) if isinstance(row, dict) else type(row)}")
+                    else:
+                        logger.warning(f"Rows is not a list or is empty: {rows}")
+                return data
             
             return None
             
@@ -212,33 +227,358 @@ class QBODataFetcher:
             logger.error(f"Error fetching Cash Flow Statement report: {e}")
             return None
     
-    def get_financial_data_for_sankey(self) -> Dict[str, Any]:
+    def get_financial_data_for_sankey(self, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """
         Get financial data formatted for Sankey diagram creation
         
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            
         Returns:
             Dictionary containing income and expense data
         """
         try:
             # Get Profit and Loss data
-            pl_data = self.get_profit_and_loss()
+            pl_data = self.get_profit_and_loss(start_date, end_date)
             
             if not pl_data:
                 logger.warning("No Profit and Loss data available")
                 return self._get_sample_financial_data()
             
-            # Extract income and expense data
-            income_data = {}
-            expense_data = {}
+            # Parse the P&L report data
+            parsed_data = self._parse_profit_loss_report(pl_data)
             
-            # This would need to be implemented based on the actual QBO report structure
-            # For now, return sample data
-            logger.info("Extracting financial data for Sankey diagram")
-            return self._get_sample_financial_data()
+            if parsed_data:
+                logger.info(f"Successfully parsed financial data: {len(parsed_data.get('income', {}))} income sources, {len(parsed_data.get('expenses', {}))} expense categories")
+                return parsed_data
+            else:
+                logger.warning("Failed to parse P&L data, using sample data")
+                return self._get_sample_financial_data()
             
         except Exception as e:
             logger.error(f"Error getting financial data for Sankey: {e}")
             return self._get_sample_financial_data()
+    
+    def _parse_profit_loss_report(self, pl_data: Dict) -> Optional[Dict[str, Any]]:
+        """
+        Parse QuickBooks Profit & Loss report data
+        
+        Args:
+            pl_data: Raw P&L report data from QBO API
+            
+        Returns:
+            Parsed financial data for Sankey diagram
+        """
+        try:
+            income_sources = {}
+            expense_categories = {}
+            
+            logger.info(f"Parsing P&L report structure: {list(pl_data.keys())}")
+            
+            # Navigate through the report structure - QBO API format
+            # The response has ['Header', 'Columns', 'Rows'] directly, not wrapped in 'Report'
+            if 'Rows' in pl_data:
+                rows_data = pl_data['Rows']
+                logger.info(f"Rows type: {type(rows_data)}")
+                
+                # Handle the actual QBO structure: Rows contains a 'Row' key with the actual data
+                if isinstance(rows_data, dict) and 'Row' in rows_data:
+                    rows = rows_data['Row']
+                    logger.info(f"Found {len(rows)} rows in report")
+                elif isinstance(rows_data, list):
+                    rows = rows_data
+                    logger.info(f"Found {len(rows)} rows in report (direct list)")
+                else:
+                    logger.error(f"Unexpected Rows structure: {type(rows_data)} - {rows_data}")
+                    return None
+                
+                for i, row in enumerate(rows):
+                    logger.info(f"Row {i}: {list(row.keys()) if isinstance(row, dict) else type(row)}")
+                    
+                    # Log the full row structure for debugging
+                    if isinstance(row, dict):
+                        logger.info(f"Row {i} full structure: {row}")
+                    
+                    # Handle different row structures
+                    if isinstance(row, dict):
+                        if 'ColData' in row:
+                            # Standard row format
+                            logger.info(f"Processing standard row {i} with ColData")
+                            self._parse_row_data(row, income_sources, expense_categories)
+                        elif 'Rows' in row:
+                            # Nested rows (subcategories) - handle the QBO structure
+                            logger.info(f"Found nested rows in row {i}")
+                            nested_rows = row['Rows']
+                            
+                            # Handle nested Row structure
+                            if isinstance(nested_rows, dict) and 'Row' in nested_rows:
+                                nested_row_list = nested_rows['Row']
+                                logger.info(f"Nested rows count: {len(nested_row_list)}")
+                                for j, subrow in enumerate(nested_row_list):
+                                    logger.info(f"Subrow {j}: {list(subrow.keys()) if isinstance(subrow, dict) else type(subrow)}")
+                                    self._parse_nested_row(subrow, income_sources, expense_categories, row.get('group'))
+                            elif isinstance(nested_rows, list):
+                                logger.info(f"Nested rows count: {len(nested_rows)}")
+                                for j, subrow in enumerate(nested_rows):
+                                    logger.info(f"Subrow {j}: {list(subrow.keys()) if isinstance(subrow, dict) else type(subrow)}")
+                                    self._parse_nested_row(subrow, income_sources, expense_categories, row.get('group'))
+                        elif 'group' in row:
+                            # Group header
+                            logger.info(f"Group: {row.get('group', 'Unknown')}")
+                            if 'Rows' in row:
+                                self._parse_nested_row(row, income_sources, expense_categories, row.get('group'))
+            else:
+                logger.warning("No 'Rows' found in response")
+                return None
+            
+            # If no data found, try alternative parsing
+            if not income_sources and not expense_categories:
+                logger.warning("No financial data found in P&L report, trying alternative parsing")
+                # Check if this is a summary-only report (common for periods with no data)
+                if self._is_summary_only_report(pl_data):
+                    logger.info("Detected summary-only report - likely no transactions in this date range")
+                    logger.info("This usually means no financial activity occurred in the selected date range")
+                    sample_data = self._get_sample_financial_data()
+                    sample_data['is_sample_data'] = True
+                    return sample_data  # Use sample data for empty periods
+                return self._parse_alternative_report_structure(pl_data)
+            
+            logger.info(f"Parsed data - Income sources: {len(income_sources)}, Expenses: {len(expense_categories)}")
+            
+            return {
+                'income': income_sources,
+                'expenses': expense_categories,
+                'total_revenue': sum(income_sources.values()),
+                'total_expenses': sum(expense_categories.values()),
+                'net_income': sum(income_sources.values()) - sum(expense_categories.values())
+            }
+            
+        except Exception as e:
+            logger.error(f"Error parsing P&L report: {e}")
+            return None
+    
+    def _parse_row_data(self, row: Dict, income_sources: Dict, expense_categories: Dict, parent_group: str = None):
+        """Parse individual row data from P&L report"""
+        try:
+            if 'ColData' in row and len(row['ColData']) >= 2:
+                # Extract account name and amount
+                account_name = row['ColData'][0].get('value', '').strip()
+                amount_str = row['ColData'][1].get('value', '0').replace(',', '').replace('$', '')
+                
+                try:
+                    amount = float(amount_str) if amount_str else 0.0
+                except ValueError:
+                    amount = 0.0
+                
+                # Skip zero amounts and empty names
+                if amount == 0 or not account_name:
+                    return
+                
+                logger.info(f"Processing: {account_name} = ${amount}")
+                
+                # Create row context for better categorization
+                row_context = {
+                    'group': parent_group,
+                    'type': row.get('type', ''),
+                    'group_type': row.get('group', '')
+                }
+                
+                # Debug logging to see what context we have
+                logger.info(f"Row context for {account_name}: {row_context}")
+                
+                # Use dynamic categorization with context
+                category = self._categorize_account_dynamically(account_name, amount, row_context)
+                
+                if category == 'income' and amount > 0:
+                    income_sources[account_name] = amount
+                    logger.info(f"Added income: {account_name} = ${amount}")
+                elif category == 'expense' and amount > 0:  # QBO reports expenses as positive values
+                    expense_categories[account_name] = amount  # Store as positive
+                    logger.info(f"Added expense: {account_name} = ${amount}")
+                else:
+                    logger.info(f"Skipped: {account_name} (category: {category}, amount: {amount})")
+                    
+        except Exception as e:
+            logger.error(f"Error parsing row data: {e}")
+    
+    def _parse_nested_row(self, row: Dict, income_sources: Dict, expense_categories: Dict, parent_group: str = None):
+        """Parse nested row data from P&L report"""
+        try:
+            if isinstance(row, dict):
+                # Get the group context from the row
+                current_group = row.get('group', parent_group)
+                
+                if 'ColData' in row:
+                    # Direct data row
+                    self._parse_row_data(row, income_sources, expense_categories, current_group)
+                elif 'Rows' in row:
+                    # Further nested rows
+                    nested_rows = row['Rows']
+                    if isinstance(nested_rows, dict) and 'Row' in nested_rows:
+                        for subrow in nested_rows['Row']:
+                            self._parse_nested_row(subrow, income_sources, expense_categories, current_group)
+                    elif isinstance(nested_rows, list):
+                        for subrow in nested_rows:
+                            self._parse_nested_row(subrow, income_sources, expense_categories, current_group)
+        except Exception as e:
+            logger.error(f"Error parsing nested row data: {e}")
+    
+    def _is_summary_only_report(self, pl_data: Dict) -> bool:
+        """Check if the report contains only summary data (no detailed accounts)"""
+        try:
+            if 'Rows' in pl_data:
+                rows_data = pl_data['Rows']
+                if isinstance(rows_data, dict) and 'Row' in rows_data:
+                    rows = rows_data['Row']
+                    # Check if all rows are summary rows (no ColData with actual amounts)
+                    for row in rows:
+                        if isinstance(row, dict):
+                            # Look for rows with actual ColData (not just headers/summaries)
+                            if 'ColData' in row and len(row['ColData']) >= 2:
+                                # Check if the second column has a value (amount)
+                                amount_str = row['ColData'][1].get('value', '')
+                                if amount_str and amount_str != '':
+                                    return False  # Found actual data
+                            # Check nested rows
+                            if 'Rows' in row:
+                                nested_rows = row['Rows']
+                                if isinstance(nested_rows, dict) and 'Row' in nested_rows:
+                                    for subrow in nested_rows['Row']:
+                                        if isinstance(subrow, dict) and 'ColData' in subrow:
+                                            amount_str = subrow['ColData'][1].get('value', '')
+                                            if amount_str and amount_str != '':
+                                                return False  # Found actual data
+            return True  # No actual data found, likely summary-only
+        except Exception as e:
+            logger.error(f"Error checking summary-only report: {e}")
+            return False
+    
+    def _is_income_account(self, account_name: str) -> bool:
+        """Determine if an account is an income account"""
+        income_keywords = [
+            'revenue', 'sales', 'income', 'receipts', 'fees', 'service',
+            'product', 'consulting', 'commission', 'interest income',
+            'gross profit', 'net sales', 'total income', 'other income',
+            'interest earned', 'dividend', 'rental income', 'royalty'
+        ]
+        
+        account_lower = account_name.lower()
+        return any(keyword in account_lower for keyword in income_keywords)
+    
+    def _is_expense_account(self, account_name: str) -> bool:
+        """Determine if an account is an expense account"""
+        expense_keywords = [
+            'expense', 'cost', 'fee', 'rent', 'utilities', 'office',
+            'marketing', 'advertising', 'travel', 'meals', 'supplies',
+            'equipment', 'insurance', 'payroll', 'benefits', 'taxes',
+            'operating', 'administrative', 'professional', 'legal',
+            'bank', 'interest', 'depreciation', 'amortization',
+            'bad debt', 'wages', 'salaries', 'contractor', 'freelance'
+        ]
+        
+        account_lower = account_name.lower()
+        return any(keyword in account_lower for keyword in expense_keywords)
+    
+    def _categorize_account_dynamically(self, account_name: str, amount: float, row_context: dict = None) -> str:
+        """Dynamically categorize accounts based on QuickBooks account structure and context"""
+        account_lower = account_name.lower()
+        
+        # PRIORITY 1: Check row context first - this is the most reliable indicator
+        if row_context and 'group' in row_context:
+            group = row_context.get('group', '').lower()
+            if 'expense' in group or 'cogs' in group:
+                return 'expense'
+            elif 'income' in group or 'revenue' in group:
+                return 'income'
+        
+        # PRIORITY 2: Check for very specific income keywords (only clear income indicators)
+        clear_income_keywords = [
+            'revenue', 'sales', 'income', 'service', 'fees', 'consulting', 
+            'design', 'product income', 'services', 'landscaping services',
+            'pest control services', 'sales of product'
+        ]
+        
+        # PRIORITY 3: Check for very specific expense keywords (only clear expense indicators)
+        clear_expense_keywords = [
+            'expense', 'cost', 'supplies', 'materials', 'rent', 'utilities', 
+            'insurance', 'advertising', 'equipment', 'automobile', 'fuel', 
+            'job expenses', 'legal', 'professional', 'meals', 'entertainment', 
+            'office', 'lease', 'gas', 'electric', 'telephone', 'miscellaneous',
+            'maintenance', 'repair', 'bookkeeper', 'lawyer', 'accounting'
+        ]
+        
+        # Check for clear expense keywords first
+        if any(keyword in account_lower for keyword in clear_expense_keywords):
+            return 'expense'
+        elif any(keyword in account_lower for keyword in clear_income_keywords):
+            return 'income'
+        
+        # PRIORITY 4: Default based on amount sign (fallback)
+        if amount > 0:
+            return 'income'
+        elif amount < 0:
+            return 'expense'
+        
+        return 'other'
+    
+    def _parse_alternative_report_structure(self, pl_data: Dict) -> Optional[Dict[str, Any]]:
+        """Try alternative parsing methods for different report structures"""
+        try:
+            # This is a fallback method for different QBO report formats
+            logger.info("Attempting alternative report parsing")
+            
+            income_sources = {}
+            expense_categories = {}
+            
+            # Try to extract data from any structure we can find
+            def extract_from_any_structure(data, path=""):
+                if isinstance(data, dict):
+                    for key, value in data.items():
+                        current_path = f"{path}.{key}" if path else key
+                        
+                        # Look for ColData patterns
+                        if key == 'ColData' and isinstance(value, list) and len(value) >= 2:
+                            try:
+                                account_name = value[0].get('value', '').strip()
+                                amount_str = value[1].get('value', '0').replace(',', '').replace('$', '')
+                                amount = float(amount_str) if amount_str else 0.0
+                                
+                                if account_name and amount != 0:
+                                    logger.info(f"Alternative parsing found: {account_name} = ${amount}")
+                                    category = self._categorize_account_dynamically(account_name, amount, {'group': 'unknown'})
+                                    
+                                    if category == 'income' and amount > 0:
+                                        income_sources[account_name] = amount
+                                    elif category == 'expense' and amount < 0:
+                                        expense_categories[account_name] = abs(amount)
+                            except (ValueError, KeyError) as e:
+                                logger.debug(f"Could not parse ColData at {current_path}: {e}")
+                        
+                        # Recursively search nested structures
+                        elif isinstance(value, (dict, list)):
+                            extract_from_any_structure(value, current_path)
+                
+                elif isinstance(data, list):
+                    for i, item in enumerate(data):
+                        extract_from_any_structure(item, f"{path}[{i}]")
+            
+            # Search the entire data structure
+            extract_from_any_structure(pl_data)
+            
+            if income_sources or expense_categories:
+                logger.info(f"Alternative parsing found: {len(income_sources)} income, {len(expense_categories)} expenses")
+                return {
+                    'income': income_sources,
+                    'expenses': expense_categories,
+                    'is_sample_data': False
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error in alternative parsing: {e}")
+            return None
     
     def _get_sample_financial_data(self) -> Dict[str, Any]:
         """Get sample financial data for demonstration"""

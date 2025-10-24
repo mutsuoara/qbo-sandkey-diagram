@@ -164,13 +164,17 @@ class CredentialManager:
     def clear_tokens(self) -> bool:
         """Clear all stored tokens"""
         try:
-            # Clear individual tokens
-            token_names = ['access_token', 'refresh_token', 'realm_id', 'company_info']
-            for token_name in token_names:
-                try:
-                    keyring.delete_password(self.service_name, f"token_{token_name}")
-                except:
-                    pass  # Token might not exist
+            # Clear the main tokens JSON object
+            try:
+                keyring.delete_password(self.service_name, self.tokens_key)
+            except:
+                pass  # Tokens might not exist
+            
+            # Clear company info separately
+            try:
+                keyring.delete_password(self.service_name, "company_info")
+            except:
+                pass  # Company info might not exist
             
             logger.info("All tokens cleared successfully")
             return True

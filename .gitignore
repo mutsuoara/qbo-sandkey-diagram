@@ -68,3 +68,18 @@ tokens.json
 temp/
 tmp/
 
+# Project-specific exclusions
+# Sample data files (not part of core application)
+*.csv
+*_Profit and Loss.csv
+*_Profit and Loss*.csv
+
+# Utility scripts (not core application code)
+clear_credentials.py
+check_oauth_status.py
+find_realm_id.py
+switch_to_production.py
+
+# Documentation files (not core application code)
+SWITCH_TO_PRODUCTION.md
+
