@@ -26,7 +26,7 @@ def run_command(command, description):
 def check_heroku_cli():
     """Check if Heroku CLI is installed"""
     try:
-        subprocess.run(["heroku", "--version"], check=True, capture_output=True)
+        subprocess.run("heroku --version", shell=True, check=True, capture_output=True)
         print("✅ Heroku CLI is installed")
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -37,7 +37,7 @@ def check_heroku_cli():
 def check_git_repo():
     """Check if we're in a git repository"""
     try:
-        subprocess.run(["git", "status"], check=True, capture_output=True)
+        subprocess.run("git status", shell=True, check=True, capture_output=True)
         print("✅ Git repository found")
         return True
     except subprocess.CalledProcessError:
@@ -66,7 +66,7 @@ def main():
     
     # Check if Heroku app already exists
     try:
-        subprocess.run(["heroku", "apps:info"], check=True, capture_output=True)
+        subprocess.run("heroku apps:info", shell=True, check=True, capture_output=True)
         print("✅ Heroku app already exists")
         app_name = None
     except subprocess.CalledProcessError:
@@ -93,7 +93,7 @@ def main():
     
     # Get app URL
     try:
-        result = subprocess.run(["heroku", "apps:info", "--json"], capture_output=True, text=True)
+        result = subprocess.run("heroku apps:info --json", shell=True, capture_output=True, text=True)
         if result.returncode == 0:
             import json
             app_info = json.loads(result.stdout)
