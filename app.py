@@ -339,17 +339,23 @@ def connect_to_quickbooks(n_clicks):
         state = secrets.token_urlsafe(32)
         
         # Determine redirect URI based on environment
+        import os
         if environment == 'production':
-            # For production, check if we're running behind ngrok
-            import os
-            ngrok_url = os.environ.get('NGROK_URL')
-            if ngrok_url:
-                redirect_uri = f"{ngrok_url}/callback"
-                logger.info(f"Using ngrok redirect URI: {redirect_uri}")
+            # Check if running on Heroku
+            heroku_app_name = os.environ.get('HEROKU_APP_NAME')
+            if heroku_app_name:
+                redirect_uri = f"https://{heroku_app_name}.herokuapp.com/callback"
+                logger.info(f"Using Heroku redirect URI: {redirect_uri}")
             else:
-                # Fallback to localhost (will fail but give clear error)
-                redirect_uri = "http://localhost:8050/callback"
-                logger.warning("Production environment detected but no NGROK_URL found. OAuth will likely fail.")
+                # Check for ngrok (development)
+                ngrok_url = os.environ.get('NGROK_URL')
+                if ngrok_url:
+                    redirect_uri = f"{ngrok_url}/callback"
+                    logger.info(f"Using ngrok redirect URI: {redirect_uri}")
+                else:
+                    # Fallback to localhost (will fail but give clear error)
+                    redirect_uri = "http://localhost:8050/callback"
+                    logger.warning("Production environment detected but no Heroku or ngrok URL found. OAuth will likely fail.")
         else:
             redirect_uri = "http://localhost:8050/callback"
         
@@ -528,13 +534,19 @@ def exchange_code_for_token(code, credentials):
         }
         
         # Determine redirect URI based on environment
+        import os
         if environment == 'production':
-            import os
-            ngrok_url = os.environ.get('NGROK_URL')
-            if ngrok_url:
-                redirect_uri = f"{ngrok_url}/callback"
+            # Check if running on Heroku
+            heroku_app_name = os.environ.get('HEROKU_APP_NAME')
+            if heroku_app_name:
+                redirect_uri = f"https://{heroku_app_name}.herokuapp.com/callback"
             else:
-                redirect_uri = "http://localhost:8050/callback"
+                # Check for ngrok (development)
+                ngrok_url = os.environ.get('NGROK_URL')
+                if ngrok_url:
+                    redirect_uri = f"{ngrok_url}/callback"
+                else:
+                    redirect_uri = "http://localhost:8050/callback"
         else:
             redirect_uri = "http://localhost:8050/callback"
         
@@ -719,5 +731,11 @@ if __name__ == '__main__':
         logger.info("Credentials found - welcome page will be shown")
     
     logger.info("Starting QBO Sankey Dashboard")
-    app.run(debug=True, host='127.0.0.1', port=8050)
-    logger.info("Dash is running on http://127.0.0.1:8050/")
+    
+    # Heroku deployment configuration
+    import os
+    port = int(os.environ.get('PORT', 8050))
+    debug = os.environ.get('DEBUG', 'True').lower() == 'true'
+    
+    app.run(debug=debug, host='0.0.0.0', port=port)
+    logger.info(f"Dash is running on port {port}")
