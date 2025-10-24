@@ -54,6 +54,48 @@ def verify_password(password):
     return password_hash == APP_PASSWORD_HASH
 
 @app.server.before_request
+def enforce_https():
+    """Enforce HTTPS in production"""
+    # Skip HTTPS enforcement for local development
+    if os.environ.get('FLASK_ENV') == 'development' or os.environ.get('DEBUG') == 'True':
+        return
+    
+    # Check if request is secure (HTTPS)
+    is_secure = (
+        request.is_secure or 
+        request.headers.get('X-Forwarded-Proto') == 'https' or
+        request.headers.get('X-Forwarded-Ssl') == 'on'
+    )
+    
+    if not is_secure:
+        # Redirect to HTTPS
+        https_url = request.url.replace('http://', 'https://')
+        return redirect(https_url, code=301)
+
+@app.server.after_request
+def add_security_headers(response):
+    """Add security headers for production"""
+    # Security headers
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    response.headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'
+    
+    # Content Security Policy
+    response.headers['Content-Security-Policy'] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.plot.ly; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' https://*.intuit.com https://*.quickbooks.com; "
+        "frame-ancestors 'none';"
+    )
+    
+    return response
+
+@app.server.before_request
 def require_app_password():
     """Require password authentication for web app access"""
     # Skip auth for OAuth callback, Dash internal routes, and static files

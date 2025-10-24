@@ -1,0 +1,31 @@
+# Production Environment Configuration Template
+# Copy this file and rename to .env for production deployment
+
+# Flask Configuration
+FLASK_ENV=production
+DEBUG=False
+SECRET_KEY=your_secret_key_here
+
+# Security Configuration
+DASHBOARD_PASSWORD_HASH=your_password_hash_here
+HTTPS_ENFORCE=True
+
+# Heroku Configuration
+PORT=8050
+DYNO=web
+
+# QuickBooks OAuth Configuration
+# Set these in your Intuit Developer Console
+QBO_CLIENT_ID=your_client_id_here
+QBO_CLIENT_SECRET=your_client_secret_here
+QBO_ENVIRONMENT=production
+
+# Production URLs
+# Update these with your actual production URLs
+HEROKU_APP_URL=https://your-app-name.herokuapp.com
+REDIRECT_URI=https://your-app-name.herokuapp.com/callback
+
+# Security Headers
+X_FRAME_OPTIONS=DENY
+X_CONTENT_TYPE_OPTIONS=nosniff
+STRICT_TRANSPORT_SECURITY=max-age=31536000; includeSubDomains
