@@ -14,14 +14,14 @@ import json
 import os
 import secrets
 import requests
-from flask import request, redirect
+from flask import request, redirect, Response
 import plotly.io as pio
 import base64
 import io
 from utils.logging_config import setup_logging
 from utils.credentials import CredentialManager
 from dashboard import create_dashboard_page, create_success_page
-from api.secure_endpoints import create_secure_api_routes
+# Removed unnecessary API security - using simple password protection instead
 
 # Initialize logging
 logger = setup_logging()
@@ -36,8 +36,26 @@ company_info = None
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 app.title = "QBO Sankey Dashboard"
 
-# Initialize secure API routes
-create_secure_api_routes(app)
+# Simple password protection for web app access
+APP_PASSWORD = "QBO_Dashboard_2024"  # Change this to your secure password
+
+@app.server.before_request
+def require_app_password():
+    """Require password authentication for web app access"""
+    # Skip auth for OAuth callback, Dash internal routes, and static files
+    if (request.path in ['/callback', '/_dash'] or 
+        request.path.startswith('/_dash') or 
+        request.path.startswith('/assets')):
+        return
+    
+    # Check for basic auth
+    auth = request.authorization
+    if not auth or auth.password != APP_PASSWORD:
+        return Response(
+            'QBO Dashboard Access Required\n\nEnter the dashboard password to continue.',
+            401,
+            {'WWW-Authenticate': 'Basic realm="QBO Dashboard"'}
+        )
 
 # Helper functions
 def check_credentials():

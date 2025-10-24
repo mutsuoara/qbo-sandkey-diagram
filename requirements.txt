@@ -7,5 +7,3 @@ keyrings.alt>=5.0.0
 python-dotenv>=1.0.0
 gunicorn>=20.1.0
 kaleido>=0.2.1
-pyjwt>=2.8.0
-cryptography>=41.0.0

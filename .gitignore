@@ -80,6 +80,12 @@ check_oauth_status.py
 find_realm_id.py
 switch_to_production.py
 
+# Security test files (removed unnecessary API security)
+quick_security_test.py
+test_client.py
+setup_security.py
+test_security.py
+
 # Documentation files (not core application code)
 SWITCH_TO_PRODUCTION.md
 
