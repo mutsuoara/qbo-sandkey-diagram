@@ -24,6 +24,16 @@ REQUEST_TIMEOUT = 300  # 5 minutes
 # Load client credentials from environment
 CLIENTS = json.loads(os.environ.get('API_CLIENTS', '{}'))
 
+# Initialize security environment if not set
+if not JWT_SECRET or not CLIENTS:
+    try:
+        from config.security_config import setup_security_environment
+        setup_security_environment()
+        JWT_SECRET = os.environ.get('JWT_SECRET')
+        CLIENTS = json.loads(os.environ.get('API_CLIENTS', '{}'))
+    except ImportError:
+        logger.warning("Security config not available, using defaults")
+
 def verify_hmac_signature():
     """
     Verify HMAC signature on incoming request.

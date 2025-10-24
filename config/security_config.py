@@ -47,6 +47,12 @@ def setup_security_environment():
         logger.info("Set up default client credentials")
     
     logger.info("Security environment configured")
+    
+    # Return the configuration for testing
+    return {
+        'jwt_secret': os.environ.get('JWT_SECRET'),
+        'api_clients': json.loads(os.environ.get('API_CLIENTS', '{}'))
+    }
 
 def get_security_config() -> Dict[str, Any]:
     """Get current security configuration"""
