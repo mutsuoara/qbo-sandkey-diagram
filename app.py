@@ -544,6 +544,20 @@ def back_to_dashboard(n_clicks):
     logger.info("Back to Dashboard button clicked from PNG export")
     return create_dashboard_page()
 
+# Callback to handle Back to Setup button from error page
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("back-to-setup-from-error-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def back_to_setup_from_error(n_clicks):
+    """Handle Back to Setup button click from error page"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Back to Setup button clicked from error page")
+    return create_setup_page()
+
 # Callback to handle Back to Setup button from dashboard
 @app.callback(
     Output("main-content", "children", allow_duplicate=True),

@@ -9,6 +9,23 @@ from .sankey_charts import create_sample_sankey_diagram
 
 logger = logging.getLogger(__name__)
 
+def create_error_page(message):
+    """Create an error page with the given message"""
+    return html.Div([
+        html.Div([
+            html.H2("Error", style={'textAlign': 'center', 'color': '#e74c3c', 'marginBottom': '20px'}),
+            html.Div([
+                html.P(message, style={'color': '#721c24', 'textAlign': 'center', 'padding': '15px', 
+                                      'backgroundColor': '#f8d7da', 'borderRadius': '4px', 'borderLeft': '4px solid #dc3545'}),
+                html.Button("Back to Setup", id="back-to-setup-from-error-btn",
+                           style={'backgroundColor': '#6c757d', 'color': 'white', 'border': 'none', 
+                                  'padding': '10px 20px', 'borderRadius': '4px', 'cursor': 'pointer', 
+                                  'fontSize': '14px', 'fontWeight': 'bold', 'display': 'block', 
+                                  'margin': '20px auto'})
+            ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
+        ], style={'maxWidth': '600px', 'margin': '0 auto'})
+    ])
+
 def create_success_page():
     """Create the success page after OAuth"""
     return html.Div([
@@ -40,44 +57,41 @@ def create_dashboard_page():
     end_date = datetime.now()
     start_date = datetime(end_date.year, 1, 1)
     
-    # Try to get real data from QuickBooks
+    # Get real data from QuickBooks - NO FALLBACK TO SAMPLE DATA
     try:
         # Import credential manager to get stored tokens
         from utils.credentials import CredentialManager
         credential_manager = CredentialManager()
         tokens = credential_manager.get_tokens()
         
-        if tokens:
-            # Get environment from stored credentials
-            credentials = credential_manager.get_credentials()
-            environment = credentials.get('environment', 'sandbox') if credentials else 'sandbox'
-            
-            # Create data fetcher with stored tokens (now with automatic token refresh)
-            data_fetcher = QBODataFetcher(
-                access_token=tokens['access_token'],
-                realm_id=tokens['realm_id'],
-                environment=environment
-            )
-            
-            # Get real financial data
-            financial_data = data_fetcher.get_financial_data_for_sankey(
-                start_date.strftime('%Y-%m-%d'),
-                end_date.strftime('%Y-%m-%d')
-            )
-            
-            # Create enhanced Sankey diagram with real data
-            fig = create_enhanced_sankey_diagram(financial_data, start_date, end_date)
-            logger.info("Created dashboard with real QuickBooks data")
-        else:
-            # No tokens available, use sample data
-            fig = create_sample_sankey_diagram(start_date, end_date)
-            logger.info("No authentication tokens found, using sample data")
+        if not tokens:
+            logger.error("No authentication tokens found")
+            return create_error_page("No authentication tokens found. Please connect to QuickBooks first.")
+        
+        # Get environment from stored credentials
+        credentials = credential_manager.get_credentials()
+        environment = credentials.get('environment', 'sandbox') if credentials else 'sandbox'
+        
+        # Create data fetcher with stored tokens (now with automatic token refresh)
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=environment
+        )
+        
+        # Get real financial data
+        financial_data = data_fetcher.get_financial_data_for_sankey(
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d')
+        )
+        
+        # Create enhanced Sankey diagram with real data
+        fig = create_enhanced_sankey_diagram(financial_data, start_date, end_date)
+        logger.info("Created dashboard with real QuickBooks data")
             
     except Exception as e:
         logger.error(f"Error fetching real data: {e}")
-        # Fallback to sample data
-        fig = create_sample_sankey_diagram(start_date, end_date)
-        logger.info("Using sample data due to error")
+        return create_error_page(f"Failed to fetch QuickBooks data: {str(e)}")
     
     return html.Div([
         html.Div([
