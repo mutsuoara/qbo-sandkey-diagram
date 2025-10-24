@@ -327,7 +327,23 @@ def connect_to_quickbooks(n_clicks):
         
         # Generate OAuth URL with state parameter for security
         state = secrets.token_urlsafe(32)
-        auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri=http://localhost:8050/callback&response_type=code&access_type=offline&state={state}"
+        
+        # Determine redirect URI based on environment
+        if environment == 'production':
+            # For production, check if we're running behind ngrok
+            import os
+            ngrok_url = os.environ.get('NGROK_URL')
+            if ngrok_url:
+                redirect_uri = f"{ngrok_url}/callback"
+                logger.info(f"Using ngrok redirect URI: {redirect_uri}")
+            else:
+                # Fallback to localhost (will fail but give clear error)
+                redirect_uri = "http://localhost:8050/callback"
+                logger.warning("Production environment detected but no NGROK_URL found. OAuth will likely fail.")
+        else:
+            redirect_uri = "http://localhost:8050/callback"
+        
+        auth_url = f"https://appcenter.intuit.com/connect/oauth2?client_id={client_id}&scope=com.intuit.quickbooks.accounting&redirect_uri={redirect_uri}&response_type=code&access_type=offline&state={state}"
         
         return create_oauth_page(auth_url, environment)
         
@@ -501,10 +517,21 @@ def exchange_code_for_token(code, credentials):
             'Content-Type': 'application/x-www-form-urlencoded'
         }
         
+        # Determine redirect URI based on environment
+        if environment == 'production':
+            import os
+            ngrok_url = os.environ.get('NGROK_URL')
+            if ngrok_url:
+                redirect_uri = f"{ngrok_url}/callback"
+            else:
+                redirect_uri = "http://localhost:8050/callback"
+        else:
+            redirect_uri = "http://localhost:8050/callback"
+        
         data = {
             'grant_type': 'authorization_code',
             'code': code,
-            'redirect_uri': 'http://localhost:8050/callback'
+            'redirect_uri': redirect_uri
         }
         
         # Make the request
