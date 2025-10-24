@@ -88,7 +88,7 @@ def main():
     
     # Deploy to Heroku
     print("🚀 Deploying to Heroku...")
-    if not run_command("git push heroku main", "Deploy to Heroku"):
+    if not run_command("git push heroku master", "Deploy to Heroku"):
         return False
     
     # Get app URL

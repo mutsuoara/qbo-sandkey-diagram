@@ -5,9 +5,19 @@ Credential management using keyring for secure storage
 import keyring
 import json
 import logging
+import os
 from typing import Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
+
+# Configure keyring for Heroku environment
+if os.environ.get('DYNO'):  # Running on Heroku
+    try:
+        import keyrings.alt
+        # Use a simple file-based backend for Heroku
+        keyring.set_keyring(keyrings.alt.file.EncryptedKeyring())
+    except ImportError:
+        logger.warning("keyrings.alt not available, using fallback storage")
 
 class CredentialManager:
     """Manages secure storage of credentials using keyring"""
