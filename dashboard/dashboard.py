@@ -48,11 +48,15 @@ def create_dashboard_page():
         tokens = credential_manager.get_tokens()
         
         if tokens:
-            # Create data fetcher with stored tokens
+            # Get environment from stored credentials
+            credentials = credential_manager.get_credentials()
+            environment = credentials.get('environment', 'sandbox') if credentials else 'sandbox'
+            
+            # Create data fetcher with stored tokens (now with automatic token refresh)
             data_fetcher = QBODataFetcher(
                 access_token=tokens['access_token'],
                 realm_id=tokens['realm_id'],
-                environment='sandbox'  # or get from stored credentials
+                environment=environment
             )
             
             # Get real financial data

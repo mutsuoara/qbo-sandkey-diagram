@@ -38,13 +38,14 @@ class QBODataFetcher:
             'Accept': 'application/json'
         }
     
-    def _make_request(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
+    def _make_request(self, endpoint: str, params: Dict = None, retry_on_auth_error: bool = True) -> Optional[Dict]:
         """
-        Make a request to the QuickBooks API
+        Make a request to the QuickBooks API with automatic token refresh
         
         Args:
             endpoint: API endpoint
             params: Query parameters
+            retry_on_auth_error: Whether to retry after token refresh on 401/403
             
         Returns:
             JSON response or None if error
@@ -55,6 +56,16 @@ class QBODataFetcher:
             
             if response.status_code == 200:
                 return response.json()
+            elif response.status_code in [401, 403] and retry_on_auth_error:
+                # Token expired, try to refresh and retry
+                logger.warning(f"Authentication failed ({response.status_code}), attempting token refresh...")
+                
+                if self._refresh_token_and_retry(endpoint, params):
+                    # Retry the request with new token
+                    return self._make_request(endpoint, params, retry_on_auth_error=False)
+                else:
+                    logger.error("Token refresh failed, authentication required")
+                    return None
             else:
                 logger.error(f"API request failed: {response.status_code} - {response.text}")
                 return None
@@ -62,6 +73,38 @@ class QBODataFetcher:
         except Exception as e:
             logger.error(f"Error making API request: {e}")
             return None
+    
+    def _refresh_token_and_retry(self, endpoint: str, params: Dict = None) -> bool:
+        """
+        Refresh access token and update headers
+        
+        Returns:
+            True if token refresh successful, False otherwise
+        """
+        try:
+            from utils.credentials import CredentialManager
+            
+            # Get credential manager and attempt token refresh
+            credential_manager = CredentialManager()
+            if credential_manager.refresh_access_token():
+                # Get updated tokens
+                tokens = credential_manager.get_tokens()
+                if tokens and 'access_token' in tokens:
+                    # Update the access token in this instance
+                    self.access_token = tokens['access_token']
+                    self.headers['Authorization'] = f'Bearer {self.access_token}'
+                    logger.info("Token refreshed successfully, retrying request...")
+                    return True
+                else:
+                    logger.error("Failed to get updated tokens after refresh")
+                    return False
+            else:
+                logger.error("Token refresh failed")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error during token refresh: {e}")
+            return False
     
     def get_company_info(self) -> Optional[Dict]:
         """Get company information"""

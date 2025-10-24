@@ -161,6 +161,65 @@ class CredentialManager:
             logger.error(f"Failed to retrieve company info: {e}")
             return None
     
+    def refresh_access_token(self) -> bool:
+        """Refresh access token using stored refresh token"""
+        try:
+            # Get stored tokens
+            tokens = self.get_tokens()
+            if not tokens or 'refresh_token' not in tokens:
+                logger.error("No refresh token available")
+                return False
+            
+            # Get stored credentials for client authentication
+            credentials = self.get_credentials()
+            if not credentials:
+                logger.error("No stored credentials for token refresh")
+                return False
+            
+            # Prepare refresh request
+            import requests
+            token_url = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer"
+            
+            data = {
+                'grant_type': 'refresh_token',
+                'refresh_token': tokens['refresh_token']
+            }
+            
+            headers = {
+                'Accept': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            }
+            
+            # Make refresh request
+            response = requests.post(
+                token_url,
+                data=data,
+                headers=headers,
+                auth=(credentials['client_id'], credentials['client_secret'])
+            )
+            
+            if response.status_code == 200:
+                token_data = response.json()
+                new_access_token = token_data.get('access_token')
+                new_refresh_token = token_data.get('refresh_token', tokens['refresh_token'])
+                
+                # Update stored tokens
+                self.store_token(
+                    new_access_token, 
+                    new_refresh_token, 
+                    tokens['realm_id']
+                )
+                
+                logger.info("Access token refreshed successfully")
+                return True
+            else:
+                logger.error(f"Token refresh failed: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to refresh access token: {e}")
+            return False
+    
     def clear_tokens(self) -> bool:
         """Clear all stored tokens"""
         try:
