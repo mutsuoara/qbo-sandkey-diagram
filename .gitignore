@@ -86,6 +86,9 @@ test_client.py
 setup_security.py
 test_security.py
 
+# Password management (keep local)
+generate_password_hash.py
+
 # Documentation files (not core application code)
 SWITCH_TO_PRODUCTION.md
 

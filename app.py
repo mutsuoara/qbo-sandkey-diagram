@@ -36,8 +36,22 @@ company_info = None
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 app.title = "QBO Sankey Dashboard"
 
-# Simple password protection for web app access
-APP_PASSWORD = "QBO_Dashboard_2024"  # Change this to your secure password
+# Secure password protection for web app access
+import hashlib
+import os
+from flask import session
+
+# Get password from environment variable (more secure than hardcoded)
+APP_PASSWORD_HASH = os.environ.get('DASHBOARD_PASSWORD_HASH')
+if not APP_PASSWORD_HASH:
+    # Default hash for 'QBO_Dashboard_2024' - change this in production!
+    APP_PASSWORD_HASH = hashlib.sha256('QBO_Dashboard_2024'.encode()).hexdigest()
+    print("⚠️  WARNING: Using default password hash. Set DASHBOARD_PASSWORD_HASH environment variable for production!")
+
+def verify_password(password):
+    """Verify password against stored hash"""
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    return password_hash == APP_PASSWORD_HASH
 
 @app.server.before_request
 def require_app_password():
@@ -50,7 +64,7 @@ def require_app_password():
     
     # Check for basic auth
     auth = request.authorization
-    if not auth or auth.password != APP_PASSWORD:
+    if not auth or not verify_password(auth.password):
         return Response(
             'QBO Dashboard Access Required\n\nEnter the dashboard password to continue.',
             401,
