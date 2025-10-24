@@ -112,7 +112,6 @@ def create_improved_sankey_diagram(financial_data, start_date=None, end_date=Non
             target = target_indices,
             value = values,
             color = "rgba(0,0,0,0.2)",  # Subtle link colors
-            hoverinfo = "value"
         )
     )])
     
@@ -228,7 +227,6 @@ def create_sample_sankey_diagram(start_date=None, end_date=None):
             target = target_indices,
             value = values,
             color = "rgba(0,0,0,0.2)",  # Subtle link colors
-            hoverinfo = "value"
         )
     )])
     
