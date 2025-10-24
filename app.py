@@ -316,11 +316,28 @@ def test_setup(n_clicks, client_id, client_secret, environment):
 def export_sankey_as_png(figure, filename="sankey_diagram.png"):
     """Export a Plotly figure as PNG and return base64 encoded data"""
     try:
-        # Convert figure to PNG bytes
+        logger.info(f"Starting PNG export for figure type: {type(figure)}")
+        
+        # Check if figure is valid
+        if not figure:
+            logger.error("Figure is None or empty")
+            return None
+            
+        # Log figure structure for debugging
+        if hasattr(figure, 'data'):
+            logger.info(f"Figure has {len(figure.data)} data elements")
+        else:
+            logger.info("Figure does not have data attribute")
+            
+        # Convert figure to PNG bytes with error handling
+        logger.info("Converting figure to PNG bytes...")
         img_bytes = pio.to_image(figure, format="png", width=1200, height=800, scale=2)
+        logger.info(f"Successfully converted to PNG bytes: {len(img_bytes)} bytes")
         
         # Convert to base64 for download
+        logger.info("Converting to base64...")
         img_base64 = base64.b64encode(img_bytes).decode()
+        logger.info(f"Base64 conversion complete: {len(img_base64)} characters")
         
         # Create download link
         download_link = f"data:image/png;base64,{img_base64}"
@@ -330,6 +347,9 @@ def export_sankey_as_png(figure, filename="sankey_diagram.png"):
         
     except Exception as e:
         logger.error(f"Error exporting PNG: {e}")
+        logger.error(f"Error type: {type(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return None
 
 # Callback to handle Connect to QuickBooks button
@@ -462,21 +482,21 @@ def refresh_data(n_clicks):
     # In the future, this would refresh data from QuickBooks
     return create_dashboard_page()
 
-# Callback to handle Export Data button
-@app.callback(
-    Output("main-content", "children", allow_duplicate=True),
-    Input("export-data-btn", "n_clicks"),
-    prevent_initial_call=True
-)
-def export_data(n_clicks):
-    """Handle Export Data button click"""
-    if not n_clicks:
-        return dash.no_update
-    
-    logger.info("Export Data button clicked")
-    # In the future, this would export data
-    # For now, just stay on the dashboard
-    return dash.no_update
+# Callback to handle Export Data button (DISABLED - button hidden)
+# @app.callback(
+#     Output("main-content", "children", allow_duplicate=True),
+#     Input("export-data-btn", "n_clicks"),
+#     prevent_initial_call=True
+# )
+# def export_data(n_clicks):
+#     """Handle Export Data button click"""
+#     if not n_clicks:
+#         return dash.no_update
+#     
+#     logger.info("Export Data button clicked")
+#     # In the future, this would export data
+#     # For now, just stay on the dashboard
+#     return dash.no_update
 
 # Callback to handle Export PNG button
 @app.callback(
@@ -491,6 +511,8 @@ def export_png(n_clicks, figure):
         return dash.no_update
     
     logger.info("Export PNG button clicked")
+    logger.info(f"Figure received: {figure is not None}")
+    logger.info(f"Figure type: {type(figure)}")
     
     try:
         # Get the current Sankey figure
