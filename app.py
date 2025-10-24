@@ -189,12 +189,22 @@ app.layout = html.Div([
 # Callback to handle initial page load based on credentials
 @app.callback(
     Output("main-content", "children"),
-    Input("url", "pathname"),
+    [Input("url", "pathname"), Input("url", "search")],
     prevent_initial_call=False
 )
-def display_initial_page(pathname):
+def display_initial_page(pathname, search):
     """Display the appropriate initial page"""
     logger.info(f"Initial page load - pathname: {pathname}")
+    
+    # Check for OAuth success first
+    if search and 'auth=success' in search:
+        logger.info("OAuth success detected in main callback")
+        return create_success_page()
+    elif search and 'auth=error' in search:
+        logger.error("OAuth error detected in main callback")
+        return create_error_page("OAuth authentication failed. Please try again.")
+    
+    # Normal page logic
     if check_credentials():
         logger.info("Credentials found - showing welcome page")
         return create_welcome_page()
