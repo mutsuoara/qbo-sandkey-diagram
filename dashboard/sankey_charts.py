@@ -10,7 +10,7 @@ from typing import Dict, List, Any, Optional
 logger = logging.getLogger(__name__)
 
 def create_sankey_diagram_from_data(financial_data, start_date=None, end_date=None):
-    """Create a Sankey diagram from real QuickBooks financial data"""
+    """Create a Sankey diagram from real QuickBooks financial data with improved layout"""
     from datetime import datetime, timedelta
     
     # Set default date range (Year to Date if not provided)

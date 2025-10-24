@@ -35,7 +35,7 @@ def create_dashboard_page():
     # Create Sankey diagram with Year to Date as default
     from datetime import datetime
     from .data_fetcher import QBODataFetcher
-    from .sankey_charts import create_sankey_diagram_from_data, create_sample_sankey_diagram
+    from .improved_sankey import create_improved_sankey_diagram, create_sample_sankey_diagram
     
     end_date = datetime.now()
     start_date = datetime(end_date.year, 1, 1)
@@ -65,8 +65,8 @@ def create_dashboard_page():
                 end_date.strftime('%Y-%m-%d')
             )
             
-            # Create Sankey diagram with real data
-            fig = create_sankey_diagram_from_data(financial_data, start_date, end_date)
+            # Create improved Sankey diagram with real data
+            fig = create_improved_sankey_diagram(financial_data, start_date, end_date)
             logger.info("Created dashboard with real QuickBooks data")
         else:
             # No tokens available, use sample data

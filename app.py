@@ -656,7 +656,7 @@ def update_sankey_chart(apply_clicks, ytd_clicks, last30_clicks, last90_clicks, 
     try:
         from utils.credentials import CredentialManager
         from dashboard.data_fetcher import QBODataFetcher
-        from dashboard.sankey_charts import create_sankey_diagram_from_data, create_sample_sankey_diagram
+        from dashboard.improved_sankey import create_improved_sankey_diagram, create_sample_sankey_diagram
         
         credential_manager = CredentialManager()
         tokens = credential_manager.get_tokens()
@@ -679,8 +679,8 @@ def update_sankey_chart(apply_clicks, ytd_clicks, last30_clicks, last90_clicks, 
                 end_date.strftime('%Y-%m-%d')
             )
             
-            # Create Sankey diagram with real data
-            return create_sankey_diagram_from_data(financial_data, start_date, end_date)
+            # Create improved Sankey diagram with real data
+            return create_improved_sankey_diagram(financial_data, start_date, end_date)
         else:
             # No tokens available, use sample data
             return create_sample_sankey_diagram(start_date, end_date)
