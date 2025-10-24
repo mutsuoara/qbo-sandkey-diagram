@@ -341,10 +341,10 @@ def connect_to_quickbooks(n_clicks):
         # Determine redirect URI based on environment
         import os
         if environment == 'production':
-            # Check if running on Heroku
-            heroku_app_name = os.environ.get('HEROKU_APP_NAME')
-            if heroku_app_name:
-                redirect_uri = f"https://{heroku_app_name}.herokuapp.com/callback"
+            # Check if running on Heroku by looking for DYNO environment variable
+            if os.environ.get('DYNO'):
+                # We're on Heroku, use the hardcoded app name
+                redirect_uri = "https://qbo-sankey-dashboard-27818919af8f.herokuapp.com/callback"
                 logger.info(f"Using Heroku redirect URI: {redirect_uri}")
             else:
                 # Check for ngrok (development)
@@ -536,10 +536,10 @@ def exchange_code_for_token(code, credentials):
         # Determine redirect URI based on environment
         import os
         if environment == 'production':
-            # Check if running on Heroku
-            heroku_app_name = os.environ.get('HEROKU_APP_NAME')
-            if heroku_app_name:
-                redirect_uri = f"https://{heroku_app_name}.herokuapp.com/callback"
+            # Check if running on Heroku by looking for DYNO environment variable
+            if os.environ.get('DYNO'):
+                # We're on Heroku, use the hardcoded app name
+                redirect_uri = "https://qbo-sankey-dashboard-27818919af8f.herokuapp.com/callback"
             else:
                 # Check for ngrok (development)
                 ngrok_url = os.environ.get('NGROK_URL')
