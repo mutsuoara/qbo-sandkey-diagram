@@ -21,6 +21,7 @@ import io
 from utils.logging_config import setup_logging
 from utils.credentials import CredentialManager
 from dashboard import create_dashboard_page, create_success_page
+from api.secure_endpoints import create_secure_api_routes
 
 # Initialize logging
 logger = setup_logging()
@@ -34,6 +35,9 @@ company_info = None
 # Initialize Dash app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 app.title = "QBO Sankey Dashboard"
+
+# Initialize secure API routes
+create_secure_api_routes(app)
 
 # Helper functions
 def check_credentials():
