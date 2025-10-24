@@ -15,6 +15,9 @@ import os
 import secrets
 import requests
 from flask import request, redirect
+import plotly.io as pio
+import base64
+import io
 from utils.logging_config import setup_logging
 from utils.credentials import CredentialManager
 from dashboard import create_dashboard_page, create_success_page
@@ -310,6 +313,25 @@ def test_setup(n_clicks, client_id, client_secret, environment):
     except Exception as e:
         return create_error_page(f"Test failed: {str(e)}")
 
+def export_sankey_as_png(figure, filename="sankey_diagram.png"):
+    """Export a Plotly figure as PNG and return base64 encoded data"""
+    try:
+        # Convert figure to PNG bytes
+        img_bytes = pio.to_image(figure, format="png", width=1200, height=800, scale=2)
+        
+        # Convert to base64 for download
+        img_base64 = base64.b64encode(img_bytes).decode()
+        
+        # Create download link
+        download_link = f"data:image/png;base64,{img_base64}"
+        
+        logger.info(f"Successfully exported Sankey diagram as PNG: {filename}")
+        return download_link
+        
+    except Exception as e:
+        logger.error(f"Error exporting PNG: {e}")
+        return None
+
 # Callback to handle Connect to QuickBooks button
 @app.callback(
     Output("main-content", "children", allow_duplicate=True),
@@ -455,6 +477,72 @@ def export_data(n_clicks):
     # In the future, this would export data
     # For now, just stay on the dashboard
     return dash.no_update
+
+# Callback to handle Export PNG button
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("export-png-btn", "n_clicks"),
+    State("sankey-chart", "figure"),
+    prevent_initial_call=True
+)
+def export_png(n_clicks, figure):
+    """Handle Export PNG button click"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Export PNG button clicked")
+    
+    try:
+        # Get the current Sankey figure
+        if figure:
+            # Create a download link for the PNG
+            download_link = export_sankey_as_png(figure)
+            
+            if download_link:
+                # Create a success message with download link
+                return html.Div([
+                    html.Div([
+                        html.H2("PNG Export Ready", style={'textAlign': 'center', 'color': '#27ae60', 'marginBottom': '20px'}),
+                        html.Div([
+                            html.P("Your Sankey diagram has been exported as PNG. Click the link below to download:", 
+                                   style={'color': '#155724', 'textAlign': 'center', 'padding': '15px', 
+                                          'backgroundColor': '#d4edda', 'borderRadius': '4px', 'borderLeft': '4px solid #28a745'}),
+                            html.Div([
+                                html.A("Download PNG", href=download_link, download="sankey_diagram.png",
+                                       style={'backgroundColor': '#8e44ad', 'color': 'white', 'border': 'none', 
+                                              'padding': '15px 30px', 'borderRadius': '4px', 'cursor': 'pointer', 
+                                              'fontSize': '16px', 'fontWeight': 'bold', 'display': 'inline-block', 
+                                              'textDecoration': 'none', 'marginRight': '10px'}),
+                                html.Button("Back to Dashboard", id="back-to-dashboard-btn",
+                                           style={'backgroundColor': '#6c757d', 'color': 'white', 'border': 'none', 
+                                                  'padding': '15px 30px', 'borderRadius': '4px', 'cursor': 'pointer', 
+                                                  'fontSize': '16px', 'fontWeight': 'bold'})
+                            ], style={'textAlign': 'center', 'marginTop': '20px'})
+                        ], style={'backgroundColor': 'white', 'padding': '30px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
+                    ], style={'maxWidth': '600px', 'margin': '0 auto'})
+                ])
+            else:
+                return create_error_page("Failed to export PNG. Please try again.")
+        else:
+            return create_error_page("No chart data available for export.")
+            
+    except Exception as e:
+        logger.error(f"Error in PNG export: {e}")
+        return create_error_page(f"Export failed: {str(e)}")
+
+# Callback to handle Back to Dashboard button from PNG export
+@app.callback(
+    Output("main-content", "children", allow_duplicate=True),
+    Input("back-to-dashboard-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def back_to_dashboard(n_clicks):
+    """Handle Back to Dashboard button click from PNG export"""
+    if not n_clicks:
+        return dash.no_update
+    
+    logger.info("Back to Dashboard button clicked from PNG export")
+    return create_dashboard_page()
 
 # Callback to handle Back to Setup button from dashboard
 @app.callback(
