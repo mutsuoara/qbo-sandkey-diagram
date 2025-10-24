@@ -15,8 +15,8 @@ if os.environ.get('DYNO'):  # Running on Heroku
     try:
         import keyrings.alt
         # Use a simple file-based backend for Heroku
-        keyring.set_keyring(keyrings.alt.file.EncryptedKeyring())
-    except ImportError:
+        keyring.set_keyring(keyrings.alt.file.PlaintextKeyring())
+    except (ImportError, AttributeError):
         logger.warning("keyrings.alt not available, using fallback storage")
 
 class CredentialManager:
