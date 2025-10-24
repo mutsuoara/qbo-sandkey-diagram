@@ -49,8 +49,9 @@ def create_improved_sankey_diagram(financial_data, start_date=None, end_date=Non
         node_labels.append(f"{source}<br>${amount:,.0f}")
         node_colors.append("#27ae60")  # Green for income
     
-    # Total revenue (center column)
-    node_labels.append(f"Total Revenue<br>${total_revenue:,.0f}")
+    # Total revenue (center column) with AGI calculation below
+    agi_text = f"<br><br>AGI: ${adjusted_gross_income:,.0f}" if adjusted_gross_income != 0 else ""
+    node_labels.append(f"Total Revenue<br>${total_revenue:,.0f}{agi_text}")
     node_colors.append("#3498db")  # Blue for total revenue
     
     # Expense categories (right column) - limit to top 10 for readability
@@ -67,9 +68,7 @@ def create_improved_sankey_diagram(financial_data, start_date=None, end_date=Non
         node_labels.append(f"{expense}<br>${amount:,.0f}")
         node_colors.append("#e74c3c")  # Red for expenses
     
-    # Adjusted gross income
-    node_labels.append(f"Adjusted Gross Income<br>${adjusted_gross_income:,.0f}")
-    node_colors.append("#f39c12")  # Gold for final result
+    # AGI is now displayed as text below Total Revenue, not as a separate node
     
     # Create links
     source_indices = []
@@ -90,11 +89,7 @@ def create_improved_sankey_diagram(financial_data, start_date=None, end_date=Non
         target_indices.append(expense_start_idx + i)
         values.append(amount)
     
-    # Link from total revenue to adjusted gross income
-    adjusted_gross_idx = len(node_labels) - 1
-    source_indices.append(total_revenue_idx)
-    target_indices.append(adjusted_gross_idx)
-    values.append(adjusted_gross_income)
+    # No link to AGI - it's displayed as text below Total Revenue
     
     # Create the improved Sankey diagram
     fig = go.Figure(data=[go.Sankey(
