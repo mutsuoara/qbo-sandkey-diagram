@@ -601,13 +601,13 @@ def fetch_company_info(access_token, realm_id):
      Input("last30-btn", "n_clicks"),
      Input("last90-btn", "n_clicks"),
      Input("lastyear-btn", "n_clicks"),
-     Input("test2015-btn", "n_clicks")],
+],
     [State("start-date-picker", "date"),
      State("end-date-picker", "date")],
     prevent_initial_call=True,
     suppress_callback_exceptions=True
 )
-def update_sankey_chart(apply_clicks, ytd_clicks, last30_clicks, last90_clicks, lastyear_clicks, test2015_clicks, start_date, end_date):
+def update_sankey_chart(apply_clicks, ytd_clicks, last30_clicks, last90_clicks, lastyear_clicks, start_date, end_date):
     """Update Sankey chart based on date range selection"""
     from datetime import datetime, timedelta
     from dashboard.sankey_charts import create_sample_sankey_diagram
@@ -636,10 +636,6 @@ def update_sankey_chart(apply_clicks, ytd_clicks, last30_clicks, last90_clicks, 
         end_date = datetime.now()
         start_date = datetime(end_date.year - 1, 1, 1)
         end_date = datetime(end_date.year - 1, 12, 31)
-    elif trigger_id == 'test2015-btn' and test2015_clicks:
-        logger.info("Test 2015 Data button clicked")
-        start_date = datetime(2015, 6, 1)
-        end_date = datetime(2015, 6, 30)
     elif trigger_id == 'apply-date-range-btn' and apply_clicks:
         logger.info("Apply Date Range button clicked")
         if not start_date or not end_date:
@@ -656,7 +652,7 @@ def update_sankey_chart(apply_clicks, ytd_clicks, last30_clicks, last90_clicks, 
     try:
         from utils.credentials import CredentialManager
         from dashboard.data_fetcher import QBODataFetcher
-        from dashboard.improved_sankey import create_improved_sankey_diagram, create_sample_sankey_diagram
+        from dashboard.enhanced_sankey import create_enhanced_sankey_diagram, create_sample_sankey_diagram
         
         credential_manager = CredentialManager()
         tokens = credential_manager.get_tokens()
@@ -679,8 +675,8 @@ def update_sankey_chart(apply_clicks, ytd_clicks, last30_clicks, last90_clicks, 
                 end_date.strftime('%Y-%m-%d')
             )
             
-            # Create improved Sankey diagram with real data
-            return create_improved_sankey_diagram(financial_data, start_date, end_date)
+            # Create enhanced Sankey diagram with real data
+            return create_enhanced_sankey_diagram(financial_data, start_date, end_date)
         else:
             # No tokens available, use sample data
             return create_sample_sankey_diagram(start_date, end_date)

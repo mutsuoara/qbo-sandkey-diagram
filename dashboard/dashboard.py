@@ -35,7 +35,7 @@ def create_dashboard_page():
     # Create Sankey diagram with Year to Date as default
     from datetime import datetime
     from .data_fetcher import QBODataFetcher
-    from .improved_sankey import create_improved_sankey_diagram, create_sample_sankey_diagram
+    from .enhanced_sankey import create_enhanced_sankey_diagram, create_sample_sankey_diagram
     
     end_date = datetime.now()
     start_date = datetime(end_date.year, 1, 1)
@@ -65,8 +65,8 @@ def create_dashboard_page():
                 end_date.strftime('%Y-%m-%d')
             )
             
-            # Create improved Sankey diagram with real data
-            fig = create_improved_sankey_diagram(financial_data, start_date, end_date)
+            # Create enhanced Sankey diagram with real data
+            fig = create_enhanced_sankey_diagram(financial_data, start_date, end_date)
             logger.info("Created dashboard with real QuickBooks data")
         else:
             # No tokens available, use sample data
@@ -124,10 +124,6 @@ def create_dashboard_page():
                                    style={'backgroundColor': '#e67e22', 'color': 'white', 'border': 'none', 
                                           'padding': '6px 12px', 'borderRadius': '4px', 'cursor': 'pointer', 
                                           'fontSize': '12px', 'fontWeight': 'bold', 'marginRight': '5px'}),
-                        html.Button("Test 2015 Data", id="test2015-btn", 
-                                   style={'backgroundColor': '#9b59b6', 'color': 'white', 'border': 'none', 
-                                          'padding': '6px 12px', 'borderRadius': '4px', 'cursor': 'pointer', 
-                                          'fontSize': '12px', 'fontWeight': 'bold'})
                     ], style={'marginTop': '10px'})
                 ], style={'backgroundColor': 'white', 'padding': '20px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)', 'marginBottom': '20px'})
             ]),
@@ -139,9 +135,9 @@ def create_dashboard_page():
                     dcc.Graph(
                         id='sankey-chart',
                         figure=fig,
-                        style={'height': '600px'}
+                        style={'height': 'auto', 'minHeight': '800px'}  # Dynamic height, minimum 800px
                     )
-                ], style={'backgroundColor': 'white', 'padding': '20px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)', 'marginBottom': '20px'}),
+                ], style={'backgroundColor': 'white', 'padding': '20px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)', 'marginBottom': '40px'}),
                 
                 # Quick Actions Section
                 html.Div([
