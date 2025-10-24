@@ -89,7 +89,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         target_indices.append(expense_start_idx + i)
         values.append(amount)
     
-    # No link to AGI - it's displayed as text below Total Revenue
+    # No link to Net Income - it's displayed as text below Total Revenue
     
     # Create the enhanced Sankey diagram
     fig = go.Figure(data=[go.Sankey(
@@ -192,8 +192,9 @@ def create_sample_sankey_diagram(start_date=None, end_date=None):
         node_labels.append(f"{source}<br>${amount:,.0f}")
         node_colors.append("#27ae60")  # Green for income
     
-    # Total revenue (center column)
-    node_labels.append(f"Total Revenue<br>${total_revenue:,.0f}")
+    # Total revenue (center column) with Net Income
+    net_income_text = f"<br><br>Net Income: ${adjusted_gross_income:,.0f}" if adjusted_gross_income != 0 else ""
+    node_labels.append(f"Total Revenue<br>${total_revenue:,.0f}{net_income_text}")
     node_colors.append("#3498db")  # Blue for total revenue
     
     # Expense categories (right column)

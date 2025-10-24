@@ -50,10 +50,10 @@ def create_sankey_diagram_from_data(financial_data, start_date=None, end_date=No
             node_labels.append(f"{source}<br>${amount:,.0f}")
             node_colors.append("#2ecc71")  # Green for income sources
     
-    # Total revenue with AGI calculation below
+    # Total revenue with Net Income calculation below
     if total_revenue > 0:
-        agi_text = f"<br><br>AGI: ${adjusted_gross_income:,.0f}" if adjusted_gross_income != 0 else ""
-        node_labels.append(f"Total Revenue<br>${total_revenue:,.0f}{agi_text}")
+        net_income_text = f"<br><br>Net Income: ${adjusted_gross_income:,.0f}" if adjusted_gross_income != 0 else ""
+        node_labels.append(f"Total Revenue<br>${total_revenue:,.0f}{net_income_text}")
         node_colors.append("#3498db")  # Blue for total revenue
     
     # Expense categories with amounts
@@ -62,7 +62,7 @@ def create_sankey_diagram_from_data(financial_data, start_date=None, end_date=No
             node_labels.append(f"{expense}<br>${amount:,.0f}")
             node_colors.append("#e74c3c")  # Red for expenses
     
-    # AGI will be displayed as text below Total Revenue, not as a separate node
+    # Net Income will be displayed as text below Total Revenue, not as a separate node
     
     # Create links
     links = []
