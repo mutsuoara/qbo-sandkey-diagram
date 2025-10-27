@@ -91,7 +91,7 @@ def create_sankey_diagram_from_data(financial_data, start_date=None, end_date=No
                 values.append(amount)
                 current_expense_idx += 1
         
-        # No link to AGI - it's displayed as text below Total Revenue
+        # No link to Net Income - it's displayed as text below Total Revenue
     
     # Create the Sankey diagram
     fig = go.Figure(data=[go.Sankey(
@@ -113,7 +113,7 @@ def create_sankey_diagram_from_data(financial_data, start_date=None, end_date=No
     date_range = f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
     
     # Add title with financial summary and date range
-    title_text = f"Financial Flow Analysis ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Adjusted Gross Income: ${adjusted_gross_income:,.0f}</sub>"
+    title_text = f"Financial Flow Analysis ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Net Income: ${adjusted_gross_income:,.0f}</sub>"
     
     fig.update_layout(
         title_text=title_text,
@@ -173,7 +173,7 @@ def create_sample_sankey_diagram(start_date=None, end_date=None):
         node_colors.append("#e74c3c")  # Red for expenses
     
     # Adjusted gross income
-    node_labels.append(f"Adjusted Gross Income<br>${adjusted_gross_income:,.0f}")
+    node_labels.append(f"Net Income<br>${adjusted_gross_income:,.0f}")
     node_colors.append("#f39c12")  # Gold for final result
     
     # Create links
@@ -222,7 +222,7 @@ def create_sample_sankey_diagram(start_date=None, end_date=None):
     date_range = f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
     
     # Add title with financial summary and date range
-    title_text = f"Financial Flow Analysis ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Adjusted Gross Income: ${adjusted_gross_income:,.0f}</sub>"
+    title_text = f"Financial Flow Analysis ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Net Income: ${adjusted_gross_income:,.0f}</sub>"
     
     fig.update_layout(
         title_text=title_text,

@@ -49,9 +49,9 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         node_labels.append(f"{source}<br>${amount:,.0f}")
         node_colors.append("#27ae60")  # Green for income
     
-    # Total revenue (center column) with AGI calculation below
-    agi_text = f"<br><br>AGI: ${adjusted_gross_income:,.0f}" if adjusted_gross_income != 0 else ""
-    node_labels.append(f"Total Revenue<br>${total_revenue:,.0f}{agi_text}")
+    # Total revenue (center column) with Net Income calculation below
+    net_income_text = f"<br><br>Net Income: ${adjusted_gross_income:,.0f}" if adjusted_gross_income != 0 else ""
+    node_labels.append(f"Total Revenue<br>${total_revenue:,.0f}{net_income_text}")
     node_colors.append("#3498db")  # Blue for total revenue
     
     # Expense categories (right column) - limit to top 10 for readability
@@ -68,7 +68,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         node_labels.append(f"{expense}<br>${amount:,.0f}")
         node_colors.append("#e74c3c")  # Red for expenses
     
-    # AGI is now displayed as text below Total Revenue, not as a separate node
+    # Net Income is now displayed as text below Total Revenue, not as a separate node
     
     # Create links
     source_indices = []
@@ -114,7 +114,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     date_range = f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
     
     # Add title with financial summary and date range
-    title_text = f"Financial Flow Analysis ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Adjusted Gross Income: ${adjusted_gross_income:,.0f}</sub>"
+    title_text = f"Financial Flow Analysis ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Net Income: ${adjusted_gross_income:,.0f}</sub>"
     
     # Calculate dynamic height based on number of categories
     num_categories = len(income_sources) + len(expense_items) + 2  # +2 for total revenue and adjusted gross
@@ -203,7 +203,7 @@ def create_sample_sankey_diagram(start_date=None, end_date=None):
         node_colors.append("#e74c3c")  # Red for expenses
     
     # Adjusted gross income
-    node_labels.append(f"Adjusted Gross Income<br>${adjusted_gross_income:,.0f}")
+    node_labels.append(f"Net Income<br>${adjusted_gross_income:,.0f}")
     node_colors.append("#f39c12")  # Gold for final result
     
     # Create links
@@ -254,7 +254,7 @@ def create_sample_sankey_diagram(start_date=None, end_date=None):
     date_range = f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
     
     # Add title with financial summary and date range
-    title_text = f"Financial Flow Analysis ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Adjusted Gross Income: ${adjusted_gross_income:,.0f}</sub>"
+    title_text = f"Financial Flow Analysis ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Net Income: ${adjusted_gross_income:,.0f}</sub>"
     
     # Calculate dynamic height based on number of categories
     num_categories = len(income_sources) + len(expense_categories) + 2  # +2 for total revenue and adjusted gross
