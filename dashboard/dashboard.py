@@ -5,7 +5,7 @@ Contains the main dashboard page and success page creation functions.
 
 import logging
 from dash import html, dcc
-#from .sankey_charts import create_sample_sankey_diagram
+
 
 logger = logging.getLogger(__name__)
 
