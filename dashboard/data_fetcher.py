@@ -293,6 +293,10 @@ class QBODataFetcher:
                     # Log more details about the transaction for debugging
                     logger.info(f"🔍 TRANSACTION DETAILS: TxnType='{invoice.get('TxnType', 'N/A')}', DocNumber='{invoice.get('DocNumber', 'N/A')}', TxnDate='{invoice.get('TxnDate', 'N/A')}'")
                     
+                    # Special logging for the specific $25,134.83 amount
+                    if abs(total_amt) == 25134.83 or abs(total_amt) == 25134.84:
+                        logger.info(f"🎯 FOUND TARGET AMOUNT: ${total_amt:,.2f} - This is the journal entry we're looking for!")
+                    
                     # Check if this is a journal entry (transfer between projects)
                     # Journal entries often have negative amounts but represent positive transfers
                     invoice_type = invoice.get('TxnType', '')
@@ -309,7 +313,9 @@ class QBODataFetcher:
                     
                     if is_journal_entry:
                         logger.info(f"📝 JOURNAL ENTRY DETECTED: Treating negative amount as positive transfer")
+                        logger.info(f"📝 BEFORE CONVERSION: ${total_amt:,.2f}")
                         total_amt = abs(total_amt)  # Convert to positive
+                        logger.info(f"📝 AFTER CONVERSION: ${total_amt:,.2f}")
                     else:
                         # Skip actual credits/refunds
                         logger.info(f"💳 CREDIT/REFUND: Skipping negative transaction")
@@ -322,8 +328,14 @@ class QBODataFetcher:
                 # Add to project income
                 if project_name in project_income:
                     project_income[project_name] += total_amt
+                    logger.info(f"💰 ADDED TO EXISTING PROJECT: {project_name} += ${total_amt:,.2f} (Total: ${project_income[project_name]:,.2f})")
                 else:
                     project_income[project_name] = total_amt
+                    logger.info(f"💰 CREATED NEW PROJECT: {project_name} = ${total_amt:,.2f}")
+                
+                # Special logging for A6 Enterprise Services
+                if 'A6 Enterprise Services' in project_name:
+                    logger.info(f"🏢 A6 ENTERPRISE SERVICES UPDATE: Total now = ${project_income[project_name]:,.2f}")
             
             logger.info(f"Retrieved income from {len(project_income)} projects")
             logger.info(f"Total income: ${sum(project_income.values()):,.2f}")
