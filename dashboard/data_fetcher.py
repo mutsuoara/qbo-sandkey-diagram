@@ -693,11 +693,19 @@ class QBODataFetcher:
                 category = self._categorize_account_dynamically(account_name, amount, row_context)
                 
                 if category == 'income' and amount > 0:
-                    income_sources[account_name] = amount
-                    logger.info(f"Added income: {account_name} = ${amount}")
+                    if account_name in income_sources:
+                        logger.warning(f"⚠️ DUPLICATE INCOME: {account_name} already exists with ${income_sources[account_name]:,.2f}, adding ${amount:,.2f}")
+                        income_sources[account_name] += amount
+                    else:
+                        income_sources[account_name] = amount
+                    logger.info(f"Added income: {account_name} = ${income_sources[account_name]:,.2f}")
                 elif category == 'expense' and amount > 0:  # QBO reports expenses as positive values
-                    expense_categories[account_name] = amount  # Store as positive
-                    logger.info(f"Added expense: {account_name} = ${amount}")
+                    if account_name in expense_categories:
+                        logger.warning(f"⚠️ DUPLICATE EXPENSE: {account_name} already exists with ${expense_categories[account_name]:,.2f}, adding ${amount:,.2f}")
+                        expense_categories[account_name] += amount
+                    else:
+                        expense_categories[account_name] = amount
+                    logger.info(f"Added expense: {account_name} = ${expense_categories[account_name]:,.2f}")
                 else:
                     logger.info(f"Skipped: {account_name} (category: {category}, amount: {amount})")
                     
