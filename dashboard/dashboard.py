@@ -5,7 +5,7 @@ Contains the main dashboard page and success page creation functions.
 
 import logging
 from dash import html, dcc
-from .sankey_charts import create_sample_sankey_diagram
+#from .sankey_charts import create_sample_sankey_diagram
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,7 @@ def create_dashboard_page():
     # Create Sankey diagram with Year to Date as default
     from datetime import datetime
     from .data_fetcher import QBODataFetcher
-    from .enhanced_sankey import create_enhanced_sankey_diagram, create_sample_sankey_diagram
+    from .enhanced_sankey import create_enhanced_sankey_diagram
     
     end_date = datetime.now()
     start_date = datetime(end_date.year, 1, 1)
