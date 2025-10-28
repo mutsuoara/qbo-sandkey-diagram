@@ -500,19 +500,23 @@ class QBODataFetcher:
                 'Perigean',
                 'DMVA'
             ]
-            
+                    
             for entry in entries:
                 entry_number = entry.get('DocNumber', 'N/A')
                 txn_date = entry.get('TxnDate', 'N/A')
                 
-                # Process Line items to find project references in descriptions
+                # Process Line items to find project references in Entity names
                 lines = entry.get('Line', [])
                 
                 # Track credits and debits per project in this entry
                 entry_project_amounts = {}
                 
                 for line in lines:
-                    description = line.get('Description', '').lower()
+                    # **LOOK IN ENTITY NAME, NOT DESCRIPTION**
+                    entity = line.get('Entity', {})
+                    entity_ref = entity.get('EntityRef', {})
+                    entity_name = entity_ref.get('name', '').lower()  # This is "Agile Six Applications Inc:A6 Enterprise Services"
+                    
                     amount = float(line.get('Amount', 0))
                     
                     # Get posting type
@@ -528,13 +532,15 @@ class QBODataFetcher:
                         '4005' in account_name  # Your specific Revenue - Commercial account
                     )
                     
-                    # Only process lines that affect revenue accounts
-                    if not is_revenue_account:
+                    # Only process lines that affect revenue accounts AND have an entity name
+                    if not is_revenue_account or not entity_name:
                         continue
                     
-                    # Search for project names in the description
+                    logger.info(f"🔍 JE #{entry_number}: Found entity '{entity_name}' - {posting_type} ${amount:,.2f} to {account_name}")
+                    
+                    # Search for project names in the entity name
                     for project_keyword in project_keywords:
-                        if project_keyword.lower() in description:
+                        if project_keyword.lower() in entity_name:
                             # Credits increase income, debits decrease income
                             if posting_type == 'Credit':
                                 adjustment = amount
@@ -548,7 +554,7 @@ class QBODataFetcher:
                                 entry_project_amounts[project_keyword] = 0
                             entry_project_amounts[project_keyword] += adjustment
                             
-                            logger.info(f"📝 JE #{entry_number} ({txn_date}): Found '{project_keyword}' - {posting_type} ${amount:,.2f} to {account_name}")
+                            logger.info(f"📝 JE #{entry_number} ({txn_date}): '{project_keyword}' {posting_type} ${amount:,.2f} (adjustment: ${adjustment:,.2f})")
                             break  # Found a match, move to next line
                 
                 # Add all project adjustments from this entry
@@ -559,12 +565,8 @@ class QBODataFetcher:
                         else:
                             project_adjustments[project] = adjustment
                         
-                        logger.info(f"✅ JE #{entry_number}: {project} adjustment = ${adjustment:,.2f} (Running total: ${project_adjustments[project]:,.2f})")
-            
-            logger.info(f"Retrieved journal entry adjustments from {len(project_adjustments)} projects")
-            for project, amount in project_adjustments.items():
-                logger.info(f"  📊 {project}: ${amount:,.2f}")
-            
+                        logger.info(f"✅ JE #{entry_number}: {project} total adjustment = ${adjustment:,.2f} (Running total: ${project_adjustments[project]:,.2f})")
+
             return project_adjustments
             
         except Exception as e:
