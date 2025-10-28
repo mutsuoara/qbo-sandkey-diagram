@@ -1,2 +1,0 @@
-# QBO API integration package
-
