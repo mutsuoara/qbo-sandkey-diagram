@@ -644,7 +644,7 @@ class QBODataFetcher:
                 account_name = row['ColData'][0].get('value', '').strip()
                 
                 # Rename specific expense accounts for better clarity
-                if account_name == "5001 Salaries and Wages":
+                if account_name == "5001 Salaries & wages":
                     account_name = "Billable Salaries and Wages"
                 elif account_name == "8005 Salaries and Wages":
                     account_name = "Overhead Salaries and Wages"
