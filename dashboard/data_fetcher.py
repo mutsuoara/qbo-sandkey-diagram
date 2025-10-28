@@ -278,6 +278,10 @@ class QBODataFetcher:
                 customer_ref = invoice.get('CustomerRef', {})
                 project_name = customer_ref.get('name', 'Unknown Project')
                 
+                # Debug: Log customer names to help identify project grouping issues
+                if 'A6' in project_name:
+                    logger.info(f"🔍 A6 PROJECT FOUND: '{project_name}' (Customer ID: {customer_ref.get('value', 'N/A')})")
+                
                 # Get invoice total
                 total_amt = float(invoice.get('TotalAmt', 0))
                 
