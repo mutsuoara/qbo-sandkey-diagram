@@ -285,6 +285,10 @@ class QBODataFetcher:
                 # Get invoice total
                 total_amt = float(invoice.get('TotalAmt', 0))
                 
+                # Debug: Log negative transactions to identify credits/refunds
+                if total_amt < 0:
+                    logger.info(f"⚠️ NEGATIVE TRANSACTION: '{project_name}' = ${total_amt:,.2f} (Invoice ID: {invoice.get('Id', 'N/A')})")
+                
                 # Skip zero-amount invoices
                 if total_amt <= 0:
                     continue
