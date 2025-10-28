@@ -856,7 +856,6 @@ def fetch_company_info(access_token, realm_id):
 def update_sankey_chart(apply_clicks, ytd_clicks, last30_clicks, last90_clicks, lastyear_clicks, start_date, end_date):
     """Update Sankey chart based on date range selection"""
     from datetime import datetime, timedelta
-    from dashboard.sankey_charts import create_sample_sankey_diagram
     
     ctx = dash.callback_context
     if not ctx.triggered:
