@@ -642,6 +642,13 @@ class QBODataFetcher:
             if 'ColData' in row and len(row['ColData']) >= 2:
                 # Extract account name and amount
                 account_name = row['ColData'][0].get('value', '').strip()
+                
+                # Rename specific expense accounts for better clarity
+                if account_name == "5001 Salaries and Wages":
+                    account_name = "Billable Salaries and Wages"
+                elif account_name == "8005 Salaries and Wages":
+                    account_name = "Overhead Salaries and Wages"
+                
                 amount_str = row['ColData'][1].get('value', '0').replace(',', '').replace('$', '')
                 
                 try:
