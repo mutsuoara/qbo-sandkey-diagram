@@ -466,16 +466,6 @@ def connect_to_quickbooks(n_clicks):
                 # We're on Heroku, use the hardcoded app name
                 redirect_uri = "https://qbo-sankey-dashboard-27818919af8f.herokuapp.com/callback"
                 logger.info(f"Using Heroku redirect URI: {redirect_uri}")
-            else:
-                # Check for ngrok (development)
-                ngrok_url = os.environ.get('NGROK_URL')
-                if ngrok_url:
-                    redirect_uri = f"{ngrok_url}/callback"
-                    logger.info(f"Using ngrok redirect URI: {redirect_uri}")
-                else:
-                    # Fallback to localhost (will fail but give clear error)
-                    redirect_uri = "http://localhost:8050/callback"
-                    logger.warning("Production environment detected but no Heroku or ngrok URL found. OAuth will likely fail.")
         else:
             redirect_uri = "http://localhost:8050/callback"
         
@@ -718,6 +708,48 @@ def oauth_callback():
     except Exception as e:
         logger.error(f"OAuth callback error: {e}")
         return redirect('/?auth=error')
+
+@app.server.route('/test/projects')
+def test_project_income():
+    """Test endpoint to verify project income fetching"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime, timedelta
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        if not tokens:
+            return {"error": "No tokens found"}
+        
+        environment = credentials.get('environment', 'sandbox')
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=environment
+        )
+        
+        # Get last 90 days
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)
+        
+        project_income = data_fetcher.get_income_by_project(
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d')
+        )
+        
+        return {
+            "success": True,
+            "project_count": len(project_income),
+            "total_income": sum(project_income.values()),
+            "projects": project_income
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
 
 def exchange_code_for_token(code, credentials):
     """Exchange authorization code for access token"""

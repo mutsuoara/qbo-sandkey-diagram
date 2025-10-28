@@ -114,7 +114,10 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     date_range = f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
     
     # Add title with financial summary and date range
-    title_text = f"Financial Flow Analysis ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Net Income: ${adjusted_gross_income:,.0f}</sub>"
+    # Check if income is by project or by account
+    income_source_label = "Project Revenue" if len(income_sources) > 0 else "Account Revenue"
+    
+    title_text = f"Financial Flow Analysis - {income_source_label} ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Adjusted Gross Income: ${adjusted_gross_income:,.0f}</sub>"
     
     # Calculate dynamic height based on number of categories
     num_categories = len(income_sources) + len(expense_items) + 2  # +2 for total revenue and adjusted gross
@@ -254,7 +257,10 @@ def create_sample_sankey_diagram(start_date=None, end_date=None):
     date_range = f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
     
     # Add title with financial summary and date range
-    title_text = f"Financial Flow Analysis ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Net Income: ${adjusted_gross_income:,.0f}</sub>"
+    # Check if income is by project or by account
+    income_source_label = "Project Revenue" if len(income_sources) > 0 else "Account Revenue"
+    
+    title_text = f"Financial Flow Analysis - {income_source_label} ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Adjusted Gross Income: ${adjusted_gross_income:,.0f}</sub>"
     
     # Calculate dynamic height based on number of categories
     num_categories = len(income_sources) + len(expense_categories) + 2  # +2 for total revenue and adjusted gross
