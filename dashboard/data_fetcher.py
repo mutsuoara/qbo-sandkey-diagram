@@ -338,6 +338,13 @@ class QBODataFetcher:
                     logger.info(f"🏢 A6 ENTERPRISE SERVICES UPDATE: Total now = ${project_income[project_name]:,.2f}")
             
             logger.info(f"Retrieved income from {len(project_income)} projects")
+            
+            # Debug: Log all project names and amounts
+            logger.info("="*60)
+            logger.info("PROJECT INCOME BREAKDOWN:")
+            for project_name, amount in project_income.items():
+                logger.info(f"  📊 {project_name}: ${amount:,.2f}")
+            logger.info("="*60)
             logger.info(f"Total income: ${sum(project_income.values()):,.2f}")
             
             # Log top 5 projects for debugging
@@ -427,10 +434,82 @@ class QBODataFetcher:
                     project_income[project_name] = total_amt
             
             logger.info(f"Retrieved sales receipts from {len(project_income)} projects")
+            
+            # Debug: Log all sales receipt project names and amounts
+            logger.info("="*60)
+            logger.info("SALES RECEIPT PROJECT BREAKDOWN:")
+            for project_name, amount in project_income.items():
+                logger.info(f"  💳 {project_name}: ${amount:,.2f}")
+            logger.info("="*60)
             return project_income
             
         except Exception as e:
             logger.error(f"Error fetching sales receipts by project: {e}")
+            return {}
+    
+    def get_journal_entries_by_project(self, start_date: str = None, end_date: str = None) -> Dict[str, float]:
+        """
+        Get journal entries that affect project income
+        """
+        try:
+            if not start_date:
+                start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+            if not end_date:
+                end_date = datetime.now().strftime('%Y-%m-%d')
+            
+            logger.info(f"Fetching journal entries: {start_date} to {end_date}")
+            
+            query = (
+                f"SELECT * FROM JournalEntry "
+                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
+                f"MAXRESULTS 1000"
+            )
+            
+            params = {'query': query, 'minorversion': '65'}
+            data = self._make_request('query', params)
+            
+            if data and 'QueryResponse' in data:
+                entries = data['QueryResponse'].get('JournalEntry', [])
+                if entries:
+                    # Log the first journal entry in full
+                    logger.info(f"📋 SAMPLE JOURNAL ENTRY (full structure):")
+                    logger.info(json.dumps(entries[0], indent=2))
+            
+            if not data or 'QueryResponse' not in data:
+                return {}
+            
+            project_adjustments = {}
+            entries = data['QueryResponse'].get('JournalEntry', [])
+            
+            logger.info(f"Processing {len(entries)} journal entries")
+            
+            for entry in entries:
+                # Process Line items to find customer-specific entries
+                lines = entry.get('Line', [])
+                for line in lines:
+                    # Check if this line has a customer reference
+                    if 'Entity' in line and line['Entity'].get('Type') == 'Customer':
+                        customer_ref = line['Entity'].get('EntityRef', {})
+                        project_name = customer_ref.get('name', 'Unknown Project')
+                        
+                        # Get the amount - credit amounts increase income
+                        journal_entry_line_detail = line.get('JournalEntryLineDetail', {})
+                        posting_type = journal_entry_line_detail.get('PostingType', '')
+                        amount = float(line.get('Amount', 0))
+                        
+                        # Credits to income accounts increase project income
+                        if posting_type == 'Credit' and amount > 0:
+                            if project_name in project_adjustments:
+                                project_adjustments[project_name] += amount
+                            else:
+                                project_adjustments[project_name] = amount
+                            
+                            logger.info(f"📝 Journal Entry: {project_name} += ${amount:,.2f}")
+            
+            return project_adjustments
+            
+        except Exception as e:
+            logger.error(f"Error fetching journal entries: {e}")
             return {}
     
     def get_balance_sheet(self, start_date: str = None, end_date: str = None) -> Optional[Dict]:
@@ -523,6 +602,10 @@ class QBODataFetcher:
             # Get sales receipt income (if applicable)
             logger.info("Fetching project-level income from sales receipts...")
             receipt_income = self.get_sales_receipts_by_project(start_date, end_date)
+
+            # Get journal entry adjustments
+            logger.info("Fetching journal entry adjustments...")
+            journal_adjustments = self.get_journal_entries_by_project(start_date, end_date)
             
             # Combine invoice and sales receipt income by project
             project_income = {}
@@ -530,6 +613,13 @@ class QBODataFetcher:
                 project_income[project] = amount
             
             for project, amount in receipt_income.items():
+                if project in project_income:
+                    project_income[project] += amount
+                else:
+                    project_income[project] = amount
+
+            # Add journal entry adjustments
+            for project, amount in journal_adjustments.items():
                 if project in project_income:
                     project_income[project] += amount
                 else:
@@ -700,12 +790,21 @@ class QBODataFetcher:
                 # Extract account name and amount
                 account_name = row['ColData'][0].get('value', '').strip()
                 
-                # Rename specific expense accounts for better clarity
-                if account_name == "5001 Salaries & wages":
-                    account_name = "Billable Salaries and Wages"
-                elif account_name == "8005 Salaries and Wages":
-                    account_name = "G&A Salaries and Wages"
+            # **SKIP SUMMARY/TOTAL ROWS**
+                skip_keywords = [
+                    'total', 'subtotal', 'net income', 'gross profit',
+                    'operating income', 'income before', 'sum', 'balance'
+                ]
+                if any(keyword in account_name.lower() for keyword in skip_keywords):
+                    logger.debug(f"Skipping summary row: {account_name}")
+                    return
                 
+                # **SKIP ROWS WITH row.type == 'Section'**
+                if row.get('type') == 'Section':
+                    logger.debug(f"Skipping section header: {account_name}")
+                    return
+                
+                # Continue with existing logic...
                 amount_str = row['ColData'][1].get('value', '0').replace(',', '').replace('$', '')
                 
                 try:
@@ -768,11 +867,10 @@ class QBODataFetcher:
                 # Get the group context from the row
                 current_group = row.get('group', parent_group)
                 
-                if 'ColData' in row:
-                    # Direct data row
-                    self._parse_row_data(row, income_sources, expense_categories, current_group)
-                elif 'Rows' in row:
-                    # Further nested rows
+                # **REPLACE THE EXISTING CODE WITH THIS:**
+                # If this row has nested data, DON'T process it as a data row
+                # Only process the nested rows (the details), not the parent
+                if 'Rows' in row:
                     nested_rows = row['Rows']
                     if isinstance(nested_rows, dict) and 'Row' in nested_rows:
                         for subrow in nested_rows['Row']:
@@ -780,6 +878,13 @@ class QBODataFetcher:
                     elif isinstance(nested_rows, list):
                         for subrow in nested_rows:
                             self._parse_nested_row(subrow, income_sources, expense_categories, current_group)
+                    # Don't process ColData here - it would be a summary of the nested rows
+                    return
+                
+                # Only process ColData if there are NO nested rows
+                if 'ColData' in row:
+                    self._parse_row_data(row, income_sources, expense_categories, current_group)
+                    
         except Exception as e:
             logger.error(f"Error parsing nested row data: {e}")
     
