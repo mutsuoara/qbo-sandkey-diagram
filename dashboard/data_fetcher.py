@@ -288,6 +288,17 @@ class QBODataFetcher:
                 # Debug: Log negative transactions to identify credits/refunds
                 if total_amt < 0:
                     logger.info(f"⚠️ NEGATIVE TRANSACTION: '{project_name}' = ${total_amt:,.2f} (Invoice ID: {invoice.get('Id', 'N/A')})")
+                    
+                    # Check if this is a journal entry (transfer between projects)
+                    # Journal entries often have negative amounts but represent positive transfers
+                    invoice_type = invoice.get('TxnType', '')
+                    if invoice_type == 'JournalEntry' or 'journal' in invoice.get('DocNumber', '').lower():
+                        logger.info(f"📝 JOURNAL ENTRY DETECTED: Treating negative amount as positive transfer")
+                        total_amt = abs(total_amt)  # Convert to positive
+                    else:
+                        # Skip actual credits/refunds
+                        logger.info(f"💳 CREDIT/REFUND: Skipping negative transaction")
+                        continue
                 
                 # Skip zero-amount invoices
                 if total_amt <= 0:
@@ -367,6 +378,17 @@ class QBODataFetcher:
                 
                 # Get receipt total
                 total_amt = float(receipt.get('TotalAmt', 0))
+                
+                # Handle negative amounts (journal entries, credits, refunds)
+                if total_amt < 0:
+                    # Check if this is a journal entry (transfer between projects)
+                    receipt_type = receipt.get('TxnType', '')
+                    if receipt_type == 'JournalEntry' or 'journal' in receipt.get('DocNumber', '').lower():
+                        logger.info(f"📝 JOURNAL ENTRY DETECTED in sales receipts: Treating negative amount as positive transfer")
+                        total_amt = abs(total_amt)  # Convert to positive
+                    else:
+                        # Skip actual credits/refunds
+                        continue
                 
                 if total_amt <= 0:
                     continue
@@ -655,7 +677,7 @@ class QBODataFetcher:
                 if account_name == "5001 Salaries & wages":
                     account_name = "Billable Salaries and Wages"
                 elif account_name == "8005 Salaries and Wages":
-                    account_name = "Overhead Salaries and Wages"
+                    account_name = "G&A Salaries and Wages"
                 
                 amount_str = row['ColData'][1].get('value', '0').replace(',', '').replace('$', '')
                 
