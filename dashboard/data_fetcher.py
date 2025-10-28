@@ -734,8 +734,8 @@ class QBODataFetcher:
                         logger.warning(f"⚠️ DUPLICATE INCOME: {account_name} already exists with ${income_sources[account_name]:,.2f}, adding ${amount:,.2f}")
                         income_sources[account_name] += amount
                     else:
-                    income_sources[account_name] = amount
-                    logger.info(f"Added income: {account_name} = ${income_sources[account_name]:,.2f}")
+                        income_sources[account_name] = amount
+                        logger.info(f"Added income: {account_name} = ${income_sources[account_name]:,.2f}")
                 elif category == 'expense' and amount > 0:  # QBO reports expenses as positive values
                     if account_name in expense_categories:
                         logger.warning(f"⚠️ DUPLICATE EXPENSE: {account_name} already exists with ${expense_categories[account_name]:,.2f}, adding ${amount:,.2f}")
@@ -888,7 +888,7 @@ class QBODataFetcher:
                         if key == 'ColData' and isinstance(value, list) and len(value) >= 2:
                             try:
                                 account_name = value[0].get('value', '').strip()
-                                    amount_str = value[1].get('value', '0').replace(',', '').replace('$', '')
+                                amount_str = value[1].get('value', '0').replace(',', '').replace('$', '')
                                 amount = float(amount_str) if amount_str else 0.0
                                 
                                 if account_name and amount != 0:
