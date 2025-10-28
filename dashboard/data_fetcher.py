@@ -228,7 +228,7 @@ class QBODataFetcher:
         except Exception as e:
             logger.error(f"Error fetching Profit and Loss report: {e}")
             return None
-    
+
     def get_income_by_project(self, start_date: str = None, end_date: str = None) -> Dict[str, float]:
         """
         Get income grouped by project (QuickBooks Jobs/Sub-customers)
@@ -278,21 +278,36 @@ class QBODataFetcher:
                 customer_ref = invoice.get('CustomerRef', {})
                 project_name = customer_ref.get('name', 'Unknown Project')
                 
+                # Get invoice total
+                total_amt = float(invoice.get('TotalAmt', 0))
+                
                 # Debug: Log customer names to help identify project grouping issues
                 if 'A6' in project_name:
                     logger.info(f"🔍 A6 PROJECT FOUND: '{project_name}' (Customer ID: {customer_ref.get('value', 'N/A')})")
-                
-                # Get invoice total
-                total_amt = float(invoice.get('TotalAmt', 0))
+                    logger.info(f"🔍 A6 TRANSACTION: Amount=${total_amt:,.2f}, TxnType='{invoice.get('TxnType', 'N/A')}', DocNumber='{invoice.get('DocNumber', 'N/A')}', TxnDate='{invoice.get('TxnDate', 'N/A')}'")
                 
                 # Debug: Log negative transactions to identify credits/refunds
                 if total_amt < 0:
                     logger.info(f"⚠️ NEGATIVE TRANSACTION: '{project_name}' = ${total_amt:,.2f} (Invoice ID: {invoice.get('Id', 'N/A')})")
                     
+                    # Log more details about the transaction for debugging
+                    logger.info(f"🔍 TRANSACTION DETAILS: TxnType='{invoice.get('TxnType', 'N/A')}', DocNumber='{invoice.get('DocNumber', 'N/A')}', TxnDate='{invoice.get('TxnDate', 'N/A')}'")
+                    
                     # Check if this is a journal entry (transfer between projects)
                     # Journal entries often have negative amounts but represent positive transfers
                     invoice_type = invoice.get('TxnType', '')
-                    if invoice_type == 'JournalEntry' or 'journal' in invoice.get('DocNumber', '').lower():
+                    doc_number = invoice.get('DocNumber', '').lower()
+                    
+                    # More comprehensive journal entry detection
+                    is_journal_entry = (
+                        invoice_type == 'JournalEntry' or 
+                        'journal' in doc_number or
+                        'je' in doc_number or
+                        'transfer' in doc_number or
+                        'adjustment' in doc_number
+                    )
+                    
+                    if is_journal_entry:
                         logger.info(f"📝 JOURNAL ENTRY DETECTED: Treating negative amount as positive transfer")
                         total_amt = abs(total_amt)  # Convert to positive
                     else:
@@ -719,7 +734,7 @@ class QBODataFetcher:
                         logger.warning(f"⚠️ DUPLICATE INCOME: {account_name} already exists with ${income_sources[account_name]:,.2f}, adding ${amount:,.2f}")
                         income_sources[account_name] += amount
                     else:
-                        income_sources[account_name] = amount
+                    income_sources[account_name] = amount
                     logger.info(f"Added income: {account_name} = ${income_sources[account_name]:,.2f}")
                 elif category == 'expense' and amount > 0:  # QBO reports expenses as positive values
                     if account_name in expense_categories:
@@ -873,7 +888,7 @@ class QBODataFetcher:
                         if key == 'ColData' and isinstance(value, list) and len(value) >= 2:
                             try:
                                 account_name = value[0].get('value', '').strip()
-                                amount_str = value[1].get('value', '0').replace(',', '').replace('$', '')
+                                    amount_str = value[1].get('value', '0').replace(',', '').replace('$', '')
                                 amount = float(amount_str) if amount_str else 0.0
                                 
                                 if account_name and amount != 0:
