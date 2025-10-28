@@ -662,6 +662,15 @@ class QBODataFetcher:
                 
                 logger.info(f"Processing: {account_name} = ${amount}")
                 
+                # Debug: Log all account names to help identify salary accounts
+                if "salar" in account_name.lower() or "5001" in account_name or "8005" in account_name:
+                    logger.info(f"🔍 SALARY ACCOUNT FOUND: '{account_name}' (original: {row['ColData'][0].get('value', '').strip()})")
+                
+                # Debug: Log any account starting with 5001
+                original_name = row['ColData'][0].get('value', '').strip()
+                if original_name.startswith("5001"):
+                    logger.info(f"🔍 5001 ACCOUNT DETECTED: '{original_name}' -> '{account_name}'")
+                
                 # Create row context for better categorization
                 row_context = {
                     'group': parent_group,
