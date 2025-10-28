@@ -449,7 +449,14 @@ class QBODataFetcher:
     
     def get_journal_entries_by_project(self, start_date: str = None, end_date: str = None) -> Dict[str, float]:
         """
-        Get journal entries that affect project income
+        Get journal entries that affect project income by parsing descriptions
+        
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            
+        Returns:
+            Dictionary mapping project names to journal entry adjustment amounts
         """
         try:
             if not start_date:
@@ -468,14 +475,8 @@ class QBODataFetcher:
             params = {'query': query, 'minorversion': '65'}
             data = self._make_request('query', params)
             
-            if data and 'QueryResponse' in data:
-                entries = data['QueryResponse'].get('JournalEntry', [])
-                if entries:
-                    # Log the first journal entry in full
-                    logger.info(f"📋 SAMPLE JOURNAL ENTRY (full structure):")
-                    logger.info(json.dumps(entries[0], indent=2))
-            
             if not data or 'QueryResponse' not in data:
+                logger.info("No journal entry data returned")
                 return {}
             
             project_adjustments = {}
@@ -483,33 +484,93 @@ class QBODataFetcher:
             
             logger.info(f"Processing {len(entries)} journal entries")
             
+            # Define project names to search for (add all your project names here)
+            project_keywords = [
+                'A6 Enterprise Services',
+                'A6 Surge Support',
+                'A6 DHO',
+                'A6 Financial Management',
+                'A6 CIE',
+                'A6 Cross Benefits',
+                'A6 CHAMPVA',
+                'A6 Toxic Exposure',
+                'A6 VA Form Engine',
+                'CDSP',
+                'TWS FLRA',
+                'Perigean',
+                'DMVA'
+            ]
+            
             for entry in entries:
-                # Process Line items to find customer-specific entries
+                entry_number = entry.get('DocNumber', 'N/A')
+                txn_date = entry.get('TxnDate', 'N/A')
+                
+                # Process Line items to find project references in descriptions
                 lines = entry.get('Line', [])
+                
+                # Track credits and debits per project in this entry
+                entry_project_amounts = {}
+                
                 for line in lines:
-                    # Check if this line has a customer reference
-                    if 'Entity' in line and line['Entity'].get('Type') == 'Customer':
-                        customer_ref = line['Entity'].get('EntityRef', {})
-                        project_name = customer_ref.get('name', 'Unknown Project')
-                        
-                        # Get the amount - credit amounts increase income
-                        journal_entry_line_detail = line.get('JournalEntryLineDetail', {})
-                        posting_type = journal_entry_line_detail.get('PostingType', '')
-                        amount = float(line.get('Amount', 0))
-                        
-                        # Credits to income accounts increase project income
-                        if posting_type == 'Credit' and amount > 0:
-                            if project_name in project_adjustments:
-                                project_adjustments[project_name] += amount
+                    description = line.get('Description', '').lower()
+                    amount = float(line.get('Amount', 0))
+                    
+                    # Get posting type
+                    journal_detail = line.get('JournalEntryLineDetail', {})
+                    posting_type = journal_detail.get('PostingType', '')
+                    account_ref = journal_detail.get('AccountRef', {})
+                    account_name = account_ref.get('name', '')
+                    
+                    # Check if this is a Revenue/Income account
+                    is_revenue_account = (
+                        'revenue' in account_name.lower() or
+                        'income' in account_name.lower() or
+                        '4005' in account_name  # Your specific Revenue - Commercial account
+                    )
+                    
+                    # Only process lines that affect revenue accounts
+                    if not is_revenue_account:
+                        continue
+                    
+                    # Search for project names in the description
+                    for project_keyword in project_keywords:
+                        if project_keyword.lower() in description:
+                            # Credits increase income, debits decrease income
+                            if posting_type == 'Credit':
+                                adjustment = amount
+                            elif posting_type == 'Debit':
+                                adjustment = -amount
                             else:
-                                project_adjustments[project_name] = amount
+                                continue
                             
-                            logger.info(f"📝 Journal Entry: {project_name} += ${amount:,.2f}")
+                            # Track this project's adjustment
+                            if project_keyword not in entry_project_amounts:
+                                entry_project_amounts[project_keyword] = 0
+                            entry_project_amounts[project_keyword] += adjustment
+                            
+                            logger.info(f"📝 JE #{entry_number} ({txn_date}): Found '{project_keyword}' - {posting_type} ${amount:,.2f} to {account_name}")
+                            break  # Found a match, move to next line
+                
+                # Add all project adjustments from this entry
+                for project, adjustment in entry_project_amounts.items():
+                    if adjustment != 0:  # Only add non-zero adjustments
+                        if project in project_adjustments:
+                            project_adjustments[project] += adjustment
+                        else:
+                            project_adjustments[project] = adjustment
+                        
+                        logger.info(f"✅ JE #{entry_number}: {project} adjustment = ${adjustment:,.2f} (Running total: ${project_adjustments[project]:,.2f})")
+            
+            logger.info(f"Retrieved journal entry adjustments from {len(project_adjustments)} projects")
+            for project, amount in project_adjustments.items():
+                logger.info(f"  📊 {project}: ${amount:,.2f}")
             
             return project_adjustments
             
         except Exception as e:
             logger.error(f"Error fetching journal entries: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return {}
     
     def get_balance_sheet(self, start_date: str = None, end_date: str = None) -> Optional[Dict]:
@@ -724,6 +785,11 @@ class QBODataFetcher:
                     # Log the full row structure for debugging
                     if isinstance(row, dict):
                         logger.info(f"Row {i} full structure: {row}")
+                        
+                        # **SKIP "Other Expenses" GROUP - these are typically unallowable costs**
+                        if row.get('group') == 'OtherExpenses':
+                            logger.info(f"Skipping 'Other Expenses' section (unallowable costs)")
+                            continue
                     
                     # Handle different row structures
                     if isinstance(row, dict):
@@ -846,8 +912,8 @@ class QBODataFetcher:
                         income_sources[account_name] += amount
                     else:
                         income_sources[account_name] = amount
-                        logger.info(f"Added income: {account_name} = ${income_sources[account_name]:,.2f}")
-                elif category == 'expense' and amount > 0:  # QBO reports expenses as positive values
+                    logger.info(f"Added income: {account_name} = ${income_sources[account_name]:,.2f}")
+                elif category == 'expense' and amount != 0:  # QBO reports expenses as positive values
                     if account_name in expense_categories:
                         logger.warning(f"⚠️ DUPLICATE EXPENSE: {account_name} already exists with ${expense_categories[account_name]:,.2f}, adding ${amount:,.2f}")
                         expense_categories[account_name] += amount
