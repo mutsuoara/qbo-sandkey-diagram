@@ -55,7 +55,25 @@ class QBODataFetcher:
             response = requests.get(url, headers=self.headers, params=params)
             
             if response.status_code == 200:
-                return response.json()
+                data = response.json()
+                
+                # Check for Fault objects in successful responses
+                if 'Fault' in data:
+                    fault = data.get('Fault', {})
+                    errors = fault.get('Error', [])
+                    if errors:
+                        error = errors[0]
+                        error_msg = error.get('Message', 'Unknown error')
+                        error_detail = error.get('Detail', '')
+                        error_code = error.get('code', '')
+                        logger.error(f"QuickBooks API Fault [{error_code}]: {error_msg}")
+                        if error_detail:
+                            logger.error(f"Fault detail: {error_detail}")
+                    else:
+                        logger.error(f"QuickBooks API Fault: {fault}")
+                    return None
+                
+                return data
             elif response.status_code in [401, 403] and retry_on_auth_error:
                 # Token expired, try to refresh and retry
                 logger.warning(f"Authentication failed ({response.status_code}), attempting token refresh...")
@@ -176,6 +194,9 @@ class QBODataFetcher:
             if not end_date:
                 end_date = datetime.now().strftime('%Y-%m-%d')
             
+            logger.info(f"Fetching Profit & Loss report: {start_date} to {end_date}")
+            logger.info("Using standard P&L format (income grouped by account, not by customer)")
+            
             params = {
                 'start_date': start_date,
                 'end_date': end_date
@@ -184,7 +205,7 @@ class QBODataFetcher:
             data = self._make_request('reports/ProfitAndLoss', params)
             
             if data:
-                logger.info("Successfully retrieved Profit and Loss report")
+                logger.info("Successfully retrieved Profit and Loss report (standard format)")
                 # Log the structure for debugging
                 logger.info(f"P&L Report keys: {list(data.keys())}")
                 if 'Rows' in data:
