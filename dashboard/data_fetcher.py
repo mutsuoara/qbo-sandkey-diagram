@@ -658,15 +658,36 @@ class QBODataFetcher:
             
             # Get project-level income (from invoices)
             logger.info("Fetching project-level income from invoices...")
-            invoice_income = self.get_income_by_project(start_date, end_date)
+            try:
+                invoice_income = self.get_income_by_project(start_date, end_date)
+                logger.info(f"Invoice income fetch completed: {len(invoice_income)} projects")
+            except Exception as e:
+                logger.error(f"Error fetching invoice income: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                invoice_income = {} 
             
             # Get sales receipt income (if applicable)
             logger.info("Fetching project-level income from sales receipts...")
-            receipt_income = self.get_sales_receipts_by_project(start_date, end_date)
+            try:
+                receipt_income = self.get_sales_receipts_by_project(start_date, end_date)
+                logger.info(f"Sales receipt income fetch completed: {len(receipt_income)} projects")
+            except Exception as e:
+                logger.error(f"Error fetching sales receipt income: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                receipt_income = {}
 
             # Get journal entry adjustments
             logger.info("Fetching journal entry adjustments...")
-            journal_adjustments = self.get_journal_entries_by_project(start_date, end_date)
+            try:
+                journal_adjustments = self.get_journal_entries_by_project(start_date, end_date)
+                logger.info(f"Journal entry adjustments fetch completed: {len(journal_adjustments)} projects")
+            except Exception as e:
+                logger.error(f"Error fetching journal entry adjustments: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                journal_adjustments = {}
             
             # Combine invoice and sales receipt income by project
             project_income = {}
@@ -855,6 +876,12 @@ class QBODataFetcher:
             if 'ColData' in row and len(row['ColData']) >= 2:
                 # Extract account name and amount
                 account_name = row['ColData'][0].get('value', '').strip()
+                
+                # **RENAME SALARY ACCOUNTS**
+                if account_name == "5001 Salaries & wages":
+                    account_name = "Billable Salaries and Wages"
+                elif account_name == "8005 Salaries and Wages":
+                    account_name = "G&A Salaries and Wages"
                 
             # **SKIP SUMMARY/TOTAL ROWS**
                 skip_keywords = [
