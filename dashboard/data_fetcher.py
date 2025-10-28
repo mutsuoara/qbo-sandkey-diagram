@@ -229,6 +229,153 @@ class QBODataFetcher:
             logger.error(f"Error fetching Profit and Loss report: {e}")
             return None
     
+    def get_income_by_project(self, start_date: str = None, end_date: str = None) -> Dict[str, float]:
+        """
+        Get income grouped by project (QuickBooks Jobs/Sub-customers)
+        
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            
+        Returns:
+            Dictionary mapping project names to income amounts
+        """
+        try:
+            if not start_date:
+                start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+            if not end_date:
+                end_date = datetime.now().strftime('%Y-%m-%d')
+            
+            logger.info(f"Fetching income by project: {start_date} to {end_date}")
+            
+            # Query for paid invoices in date range
+            # Note: We're looking for invoices where Balance = 0 (fully paid)
+            query = (
+                f"SELECT * FROM Invoice "
+                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
+                f"MAXRESULTS 1000"
+            )
+            
+            params = {
+                'query': query,
+                'minorversion': '65'
+            }
+            
+            data = self._make_request('query', params)
+            
+            if not data or 'QueryResponse' not in data:
+                logger.warning("No invoice data returned from query")
+                return {}
+            
+            # Group income by project
+            project_income = {}
+            invoices = data['QueryResponse'].get('Invoice', [])
+            
+            logger.info(f"Processing {len(invoices)} invoices")
+            
+            for invoice in invoices:
+                # Get customer/project reference
+                customer_ref = invoice.get('CustomerRef', {})
+                project_name = customer_ref.get('name', 'Unknown Project')
+                
+                # Get invoice total
+                total_amt = float(invoice.get('TotalAmt', 0))
+                
+                # Skip zero-amount invoices
+                if total_amt <= 0:
+                    continue
+                
+                # Add to project income
+                if project_name in project_income:
+                    project_income[project_name] += total_amt
+                else:
+                    project_income[project_name] = total_amt
+            
+            logger.info(f"Retrieved income from {len(project_income)} projects")
+            logger.info(f"Total income: ${sum(project_income.values()):,.2f}")
+            
+            # Log top 5 projects for debugging
+            sorted_projects = sorted(project_income.items(), key=lambda x: x[1], reverse=True)
+            logger.info("Top 5 projects by income:")
+            for project, amount in sorted_projects[:5]:
+                logger.info(f"  - {project}: ${amount:,.2f}")
+            
+            return project_income
+            
+        except Exception as e:
+            logger.error(f"Error fetching income by project: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {}
+    
+    def get_sales_receipts_by_project(self, start_date: str = None, end_date: str = None) -> Dict[str, float]:
+        """
+        Get cash sales grouped by project from SalesReceipt entities
+        (for businesses that use sales receipts instead of invoices)
+        
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            
+        Returns:
+            Dictionary mapping project names to sales receipt amounts
+        """
+        try:
+            if not start_date:
+                start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+            if not end_date:
+                end_date = datetime.now().strftime('%Y-%m-%d')
+            
+            logger.info(f"Fetching sales receipts by project: {start_date} to {end_date}")
+            
+            # Query for sales receipts in date range
+            query = (
+                f"SELECT * FROM SalesReceipt "
+                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
+                f"MAXRESULTS 1000"
+            )
+            
+            params = {
+                'query': query,
+                'minorversion': '65'
+            }
+            
+            data = self._make_request('query', params)
+            
+            if not data or 'QueryResponse' not in data:
+                logger.info("No sales receipt data returned")
+                return {}
+            
+            # Group by project
+            project_income = {}
+            receipts = data['QueryResponse'].get('SalesReceipt', [])
+            
+            logger.info(f"Processing {len(receipts)} sales receipts")
+            
+            for receipt in receipts:
+                # Get customer/project reference
+                customer_ref = receipt.get('CustomerRef', {})
+                project_name = customer_ref.get('name', 'Unknown Project')
+                
+                # Get receipt total
+                total_amt = float(receipt.get('TotalAmt', 0))
+                
+                if total_amt <= 0:
+                    continue
+                
+                # Add to project income
+                if project_name in project_income:
+                    project_income[project_name] += total_amt
+                else:
+                    project_income[project_name] = total_amt
+            
+            logger.info(f"Retrieved sales receipts from {len(project_income)} projects")
+            return project_income
+            
+        except Exception as e:
+            logger.error(f"Error fetching sales receipts by project: {e}")
+            return {}
+    
     def get_balance_sheet(self, start_date: str = None, end_date: str = None) -> Optional[Dict]:
         """
         Get Balance Sheet report
@@ -294,35 +441,102 @@ class QBODataFetcher:
     def get_financial_data_for_sankey(self, start_date: str = None, end_date: str = None) -> Dict[str, Any]:
         """
         Get financial data formatted for Sankey diagram creation
+        Uses project-level income and account-level expenses
         
         Args:
             start_date: Start date in YYYY-MM-DD format
             end_date: End date in YYYY-MM-DD format
             
         Returns:
-            Dictionary containing income and expense data
+            Dictionary containing:
+            - income: Dict mapping project names to income amounts
+            - expenses: Dict mapping expense account names to amounts
+            - metadata: Summary statistics
         """
         try:
-            # Get Profit and Loss data
+            logger.info("="*60)
+            logger.info("Getting financial data for Sankey diagram...")
+            logger.info(f"Date range: {start_date} to {end_date}")
+            logger.info("="*60)
+            
+            # Get project-level income (from invoices)
+            logger.info("Fetching project-level income from invoices...")
+            invoice_income = self.get_income_by_project(start_date, end_date)
+            
+            # Get sales receipt income (if applicable)
+            logger.info("Fetching project-level income from sales receipts...")
+            receipt_income = self.get_sales_receipts_by_project(start_date, end_date)
+            
+            # Combine invoice and sales receipt income by project
+            project_income = {}
+            for project, amount in invoice_income.items():
+                project_income[project] = amount
+            
+            for project, amount in receipt_income.items():
+                if project in project_income:
+                    project_income[project] += amount
+                else:
+                    project_income[project] = amount
+            
+            if not project_income:
+                logger.warning("No project income data found - using P&L account-level data as fallback")
+                # Fallback to P&L report for account-level income
+                pl_data = self.get_profit_and_loss(start_date, end_date)
+                if pl_data:
+                    parsed_data = self._parse_profit_loss_report(pl_data)
+                    if parsed_data:
+                        project_income = parsed_data.get('income', {})
+            
+            # Get expense data from P&L report
+            logger.info("Fetching expense data from P&L report...")
             pl_data = self.get_profit_and_loss(start_date, end_date)
             
-            if not pl_data:
-                logger.warning("No Profit and Loss data available")
-                return self._get_sample_financial_data()
+            expense_categories = {}
+            if pl_data:
+                parsed_data = self._parse_profit_loss_report(pl_data)
+                if parsed_data:
+                    expense_categories = parsed_data.get('expenses', {})
             
-            # Parse the P&L report data
-            parsed_data = self._parse_profit_loss_report(pl_data)
+            if not expense_categories:
+                logger.warning("No expense data found")
             
-            if parsed_data:
-                logger.info(f"Successfully parsed financial data: {len(parsed_data.get('income', {}))} income sources, {len(parsed_data.get('expenses', {}))} expense categories")
-                return parsed_data
-            else:
-                logger.warning("Failed to parse P&L data, using sample data")
-                return self._get_sample_financial_data()
+            # Calculate totals
+            total_revenue = sum(project_income.values())
+            total_expenses = sum(expense_categories.values())
+            net_income = total_revenue - total_expenses
+            
+            logger.info("="*60)
+            logger.info("Financial Data Summary:")
+            logger.info(f"  Projects with income: {len(project_income)}")
+            logger.info(f"  Expense categories: {len(expense_categories)}")
+            logger.info(f"  Total revenue: ${total_revenue:,.2f}")
+            logger.info(f"  Total expenses: ${total_expenses:,.2f}")
+            logger.info(f"  Net income: ${net_income:,.2f}")
+            logger.info("="*60)
+            
+            return {
+                'income': project_income,
+                'expenses': expense_categories,
+                'total_revenue': total_revenue,
+                'total_expenses': total_expenses,
+                'net_income': net_income,
+                'income_source_type': 'projects'  # Metadata for UI
+            }
             
         except Exception as e:
             logger.error(f"Error getting financial data for Sankey: {e}")
-            return self._get_sample_financial_data()
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            
+            # Return empty data structure
+            return {
+                'income': {},
+                'expenses': {},
+                'total_revenue': 0,
+                'total_expenses': 0,
+                'net_income': 0,
+                'income_source_type': 'none'
+            }
     
     def _parse_profit_loss_report(self, pl_data: Dict) -> Optional[Dict[str, Any]]:
         """
