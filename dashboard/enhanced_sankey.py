@@ -54,15 +54,10 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     node_labels.append(f"Total Revenue<br>${total_revenue:,.0f}{net_income_text}")
     node_colors.append("#3498db")  # Blue for total revenue
     
-    # Expense categories (right column) - limit to top 10 for readability
+    # Expense categories (right column) - Option C: Show ALL categories (no grouping)
     expense_items = list(expense_categories.items())
-    if len(expense_items) > 10:
-        # Sort by amount and take top 10
-        expense_items = sorted(expense_items, key=lambda x: x[1], reverse=True)[:10]
-        # Add "Other Expenses" for remaining
-        other_amount = sum(amount for _, amount in list(expense_categories.items())[10:])
-        if other_amount > 0:
-            expense_items.append(("Other Expenses", other_amount))
+    # Sort by amount (descending) for better visual organization, but show all
+    expense_items = sorted(expense_items, key=lambda x: x[1], reverse=True)
     
     for expense, amount in expense_items:
         node_labels.append(f"{expense}<br>${amount:,.0f}")
@@ -117,12 +112,17 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # Check if income is by project or by account
     income_source_label = "Project Revenue" if len(income_sources) > 0 else "Account Revenue"
     
-    title_text = f"Financial Flow Analysis - {income_source_label} ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Adjusted Gross Income: ${adjusted_gross_income:,.0f}</sub>"
+    title_text = f"Financial Flow Analysis - {income_source_label} ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Net Income: ${adjusted_gross_income:,.0f}</sub>"
+    
+    # Calculate dynamic height based on number of categories (Option C: all categories shown)
+    num_categories = len(income_sources) + len(expense_items) + 1  # +1 for total revenue node
+    # Dynamic height: min 800px, max 3000px, 60px per category
+    dynamic_height = max(800, min(3000, 300 + (num_categories * 60)))
     
     fig.update_layout(
         title_text=title_text,
         font_size=10,  # Smaller font size for better readability and compact display
-        height=800,   # Increased height for better text visibility
+        height=dynamic_height,   # Dynamic height to accommodate all categories (Option C)
         width=None,   # Let it be responsive to container width
         margin=dict(l=60, r=60, t=100, b=60),  # Reduced margins for more diagram space
         plot_bgcolor='white',
@@ -256,7 +256,7 @@ def create_sample_sankey_diagram(start_date=None, end_date=None):
     # Check if income is by project or by account
     income_source_label = "Project Revenue" if len(income_sources) > 0 else "Account Revenue"
     
-    title_text = f"Financial Flow Analysis - {income_source_label} ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Adjusted Gross Income: ${adjusted_gross_income:,.0f}</sub>"
+    title_text = f"Financial Flow Analysis - {income_source_label} ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Net Income: ${adjusted_gross_income:,.0f}</sub>"
     
     # Calculate dynamic height based on number of categories
     num_categories = len(income_sources) + len(expense_categories) + 2  # +2 for total revenue and adjusted gross
