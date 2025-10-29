@@ -5,6 +5,7 @@ Enhanced Sankey diagram with zoom, pan, and dynamic sizing
 import plotly.graph_objects as go
 import logging
 import re
+import math
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
@@ -151,24 +152,39 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     
     # Net Income is now displayed as text below Total Revenue, not as a separate node
     
-    # Create links
+    # Create links with logarithmic scaling for thickness
+    # Values < $20,000 will appear as thin lines, larger values scale logarithmically
     source_indices = []
     target_indices = []
     values = []
+    
+    # Threshold: values below $20k will appear as thin lines (use minimum value)
+    threshold = 20000
+    min_log_value = 100  # Minimum for thin lines
+    
+    def scale_value(val):
+        """Scale value logarithmically: values < $20k become thin lines"""
+        if val < threshold:
+            return min_log_value  # Thin line for values < $20k
+        else:
+            # Logarithmic scaling for values >= $20k
+            # log10(val / threshold) * scale_factor + min_value
+            log_factor = math.log10(max(val, 1) / threshold)
+            return min_log_value + (log_factor * threshold * 0.3)
     
     # Links from income sources to total revenue
     total_revenue_idx = len(income_sources)
     for i, (source, amount) in enumerate(income_sources.items()):
         source_indices.append(i)
         target_indices.append(total_revenue_idx)
-        values.append(amount)
+        values.append(scale_value(amount))
     
     # Links from total revenue to expense categories
     expense_start_idx = total_revenue_idx + 1
     for i, (expense, amount) in enumerate(expense_items):
         source_indices.append(total_revenue_idx)
         target_indices.append(expense_start_idx + i)
-        values.append(amount)
+        values.append(scale_value(amount))
     
     # No link to Net Income - it's displayed as text below Total Revenue
     
@@ -186,7 +202,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         link = dict(
             source = source_indices,
             target = target_indices,
-            value = values,
+            value = values,  # Logarithmically scaled values for thickness
             color = "rgba(0,0,0,0.2)"  # Subtle link colors
         )
     )])
@@ -202,8 +218,8 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     
     # Calculate dynamic height based on number of categories (Option C: all categories shown)
     num_categories = len(income_sources) + len(expense_items) + 1  # +1 for total revenue node
-    # Dynamic height: min 800px, max 3000px, 60px per category
-    dynamic_height = max(800, min(3000, 300 + (num_categories * 60)))
+    # Dynamic height: min 600px, max 1500px, 40px per category
+    dynamic_height = max(600, min(1500, 250 + (num_categories * 40)))
     
     fig.update_layout(
         title_text=title_text,
