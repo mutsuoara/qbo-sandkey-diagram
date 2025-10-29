@@ -137,8 +137,10 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         node_colors.append("#27ae60")  # Green for income
     
     # Total revenue (center column) with Net Income calculation below
-    net_income_text = f"<br><br>Net Income: ${adjusted_gross_income:,.0f}" if adjusted_gross_income != 0 else ""
-    node_labels.append(f"Total Revenue<br>${total_revenue:,.0f}{net_income_text}")
+    # Note: Plotly Sankey doesn't support HTML in labels, so we'll make the text stand out with formatting
+    # The thickness will be increased separately below
+    net_income_text = f"<br><br><b>Net Income:</b> ${adjusted_gross_income:,.0f}" if adjusted_gross_income != 0 else ""
+    node_labels.append(f"<b>Total Revenue</b><br>${total_revenue:,.0f}{net_income_text}")
     node_colors.append("#3498db")  # Blue for total revenue
     
     # Expense categories (right column) - Show grouped and individual expenses
@@ -188,11 +190,16 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     
     # No link to Net Income - it's displayed as text below Total Revenue
     
+    # Create thickness array - make Total Revenue node (center blue) wider
+    total_nodes = len(node_labels)
+    node_thickness = [22] * total_nodes  # Default thickness for all nodes
+    node_thickness[total_revenue_idx] = 35  # Make Total Revenue node wider (center blue bar)
+    
     # Create the enhanced Sankey diagram
     fig = go.Figure(data=[go.Sankey(
         node = dict(
             pad = 25,  # Reduced padding for tighter layout
-            thickness = 22,  # Slightly thinner nodes for better fit
+            thickness = node_thickness,  # Custom thickness array - Total Revenue node is thicker
             line = dict(color = "black", width = 1),
             label = node_labels,
             color = node_colors,
