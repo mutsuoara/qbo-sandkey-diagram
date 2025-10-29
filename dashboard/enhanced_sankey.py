@@ -167,10 +167,10 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         if val < threshold:
             return min_log_value  # Thin line for values < $20k
         else:
-            # Logarithmic scaling for values >= $20k
+            # Logarithmic scaling for values >= $20k (reduced scaling factor)
             # log10(val / threshold) * scale_factor + min_value
             log_factor = math.log10(max(val, 1) / threshold)
-            return min_log_value + (log_factor * threshold * 0.3)
+            return min_log_value + (log_factor * threshold * 0.15)  # Reduced from 0.3 to 0.15
     
     # Links from income sources to total revenue
     total_revenue_idx = len(income_sources)
@@ -218,8 +218,8 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     
     # Calculate dynamic height based on number of categories (Option C: all categories shown)
     num_categories = len(income_sources) + len(expense_items) + 1  # +1 for total revenue node
-    # Dynamic height: min 600px, max 1500px, 40px per category
-    dynamic_height = max(600, min(1500, 250 + (num_categories * 40)))
+    # Dynamic height: min 500px, max 1000px, 30px per category (more compact)
+    dynamic_height = max(500, min(1000, 200 + (num_categories * 30)))
     
     fig.update_layout(
         title_text=title_text,
