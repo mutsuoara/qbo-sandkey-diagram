@@ -4,10 +4,65 @@ Enhanced Sankey diagram with zoom, pan, and dynamic sizing
 
 import plotly.graph_objects as go
 import logging
+import re
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+def group_expenses_by_account_number(expense_categories: Dict[str, float]) -> Dict[str, float]:
+    """
+    Group expenses based on account number ranges and dollar amounts.
+    
+    Rules:
+    - If amount < $10,000, group by account number range
+    - If amount >= $10,000, keep as individual expense
+    - Group ranges:
+      - Fringe & Benefits = 6000-6300
+      - Facility Expenses = 6500-6999
+      - OH Other Expenses = 7000-7500
+    
+    Args:
+        expense_categories: Dictionary mapping expense names to amounts
+        
+    Returns:
+        Dictionary with grouped and individual expenses
+    """
+    grouped_expenses = {}
+    group_ranges = {
+        'Fringe & Benefits': (6000, 6300),
+        'Facility Expenses': (6500, 6999),
+        'OH Other Expenses': (7000, 7500)
+    }
+    threshold = 10000  # Group if less than this amount
+    
+    for expense_name, amount in expense_categories.items():
+        # Extract account number from start of name (e.g., "6001 Some Expense" -> 6001)
+        match = re.match(r'^(\d{3,4})', expense_name)
+        
+        if match and amount < threshold:
+            account_num = int(match.group(1))
+            
+            # Check which group this account belongs to
+            grouped = False
+            for group_name, (min_num, max_num) in group_ranges.items():
+                if min_num <= account_num <= max_num:
+                    if group_name in grouped_expenses:
+                        grouped_expenses[group_name] += amount
+                    else:
+                        grouped_expenses[group_name] = amount
+                    grouped = True
+                    logger.debug(f"Grouped '{expense_name}' (${amount:,.2f}) into '{group_name}'")
+                    break
+            
+            # If not in any group range, keep as individual
+            if not grouped:
+                grouped_expenses[expense_name] = amount
+        else:
+            # Amount >= threshold OR no account number found - keep as individual
+            grouped_expenses[expense_name] = amount
+    
+    return grouped_expenses
 
 def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=None):
     """Create an enhanced Sankey diagram with zoom, pan, and dynamic sizing"""
@@ -24,10 +79,15 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     income_sources = financial_data.get('income', {})
     expense_categories = financial_data.get('expenses', {})
     
-    # If no real data, use sample data
+    # **GROUP EXPENSES** based on account numbers and amounts
+    if expense_categories:
+        expense_categories = group_expenses_by_account_number(expense_categories)
+        logger.info(f"After grouping: {len(expense_categories)} expense categories")
+    
+    # If no real data, log warning and return None
     if not income_sources and not expense_categories:
-        logger.warning("No financial data available, using sample data")
-        return create_sample_sankey_diagram(start_date, end_date)
+        logger.warning("No financial data available")
+        return None
     
     # Ensure we have some data
     if not income_sources:
@@ -54,9 +114,9 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     node_labels.append(f"Total Revenue<br>${total_revenue:,.0f}{net_income_text}")
     node_colors.append("#3498db")  # Blue for total revenue
     
-    # Expense categories (right column) - Option C: Show ALL categories (no grouping)
+    # Expense categories (right column) - Show grouped and individual expenses
     expense_items = list(expense_categories.items())
-    # Sort by amount (descending) for better visual organization, but show all
+    # Sort by amount (descending) for better visual organization
     expense_items = sorted(expense_items, key=lambda x: x[1], reverse=True)
     
     for expense, amount in expense_items:
