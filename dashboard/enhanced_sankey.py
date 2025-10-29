@@ -190,16 +190,15 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     
     # No link to Net Income - it's displayed as text below Total Revenue
     
-    # Create thickness array - make Total Revenue node (center blue) wider
-    total_nodes = len(node_labels)
-    node_thickness = [22] * total_nodes  # Default thickness for all nodes
-    node_thickness[total_revenue_idx] = 35  # Make Total Revenue node wider (center blue bar)
+    # Note: Plotly Sankey only supports a single thickness value for all nodes
+    # To make Total Revenue appear larger, we increase global thickness
+    # The center node (Total Revenue) will benefit from this since it has the most connections
     
     # Create the enhanced Sankey diagram
     fig = go.Figure(data=[go.Sankey(
         node = dict(
             pad = 25,  # Reduced padding for tighter layout
-            thickness = node_thickness,  # Custom thickness array - Total Revenue node is thicker
+            thickness = 35,  # Increased thickness for all nodes (was 22) - makes center node more prominent
             line = dict(color = "black", width = 1),
             label = node_labels,
             color = node_colors,
