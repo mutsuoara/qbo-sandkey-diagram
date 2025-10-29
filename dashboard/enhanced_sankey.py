@@ -94,12 +94,12 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # Create the enhanced Sankey diagram
     fig = go.Figure(data=[go.Sankey(
         node = dict(
-            pad = 40,  # Much more padding between nodes
-            thickness = 30,  # Thicker nodes for better visibility
+            pad = 25,  # Reduced padding for tighter layout
+            thickness = 22,  # Slightly thinner nodes for better fit
             line = dict(color = "black", width = 1),
             label = node_labels,
             color = node_colors,
-            x = [0.1, 0.5, 0.9],  # Spread columns across the width
+            x = [0.05, 0.5, 0.95],  # Spread even wider across width
             y = None  # Auto-arrange vertically
         ),
         link = dict(
@@ -119,16 +119,12 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     
     title_text = f"Financial Flow Analysis - {income_source_label} ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Adjusted Gross Income: ${adjusted_gross_income:,.0f}</sub>"
     
-    # Calculate dynamic height based on number of categories
-    num_categories = len(income_sources) + len(expense_items) + 2  # +2 for total revenue and adjusted gross
-    # Much more generous height calculation - 80px per category with better min/max
-    dynamic_height = max(800, min(2000, 300 + (num_categories * 80)))  # Min 800, max 2000, 80px per category
-    
     fig.update_layout(
         title_text=title_text,
-        font_size=18,  # Larger font for better readability
-        height=dynamic_height,  # Dynamic height based on content
-        margin=dict(l=80, r=80, t=120, b=80),  # More margin space
+        font_size=16,  # Slightly smaller font for better fit
+        height=700,   # Fixed shorter height
+        width=1600,   # Fixed wider width
+        margin=dict(l=60, r=60, t=100, b=60),  # Reduced margins for more diagram space
         plot_bgcolor='white',
         paper_bgcolor='white',
         title_x=0.5,  # Center the title
@@ -137,7 +133,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         # Make it responsive
-        autosize=True,
+        autosize=False,  # Disable autosize for precise control
         # Enable zoom and pan
         dragmode='zoom',
         # Add zoom controls
@@ -237,12 +233,12 @@ def create_sample_sankey_diagram(start_date=None, end_date=None):
     # Create the enhanced Sankey diagram
     fig = go.Figure(data=[go.Sankey(
         node = dict(
-            pad = 40,  # Much more padding between nodes
-            thickness = 30,  # Thicker nodes for better visibility
+            pad = 25,  # Reduced padding for tighter layout
+            thickness = 22,  # Slightly thinner nodes for better fit
             line = dict(color = "black", width = 1),
             label = node_labels,
             color = node_colors,
-            x = [0.1, 0.5, 0.9],  # Spread columns across the width
+            x = [0.05, 0.5, 0.95],  # Spread even wider across width
             y = None  # Auto-arrange vertically
         ),
         link = dict(
