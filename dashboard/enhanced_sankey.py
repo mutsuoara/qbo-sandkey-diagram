@@ -21,6 +21,7 @@ def group_expenses_by_account_number(expense_categories: Dict[str, float]) -> Di
       - Fringe & Benefits = 6000-6300
       - Facility Expenses = 6500-6999
       - OH Other Expenses = 7000-7500
+      - GA Other Expenses = 8000-8499
     
     Args:
         expense_categories: Dictionary mapping expense names to amounts
@@ -32,16 +33,27 @@ def group_expenses_by_account_number(expense_categories: Dict[str, float]) -> Di
     group_ranges = {
         'Fringe & Benefits': (6000, 6300),
         'Facility Expenses': (6500, 6999),
-        'OH Other Expenses': (7000, 7500)
+        'OH Other Expenses': (7000, 7500),
+        'GA Other Expenses': (8000, 8499)
     }
     threshold = 10000  # Group if less than this amount
     
+    logger.info(f"Grouping expenses: {len(expense_categories)} expenses before grouping")
+    
     for expense_name, amount in expense_categories.items():
+        # Debug logging for account 8500 specifically
+        if '8500' in expense_name or 'GA Travel' in expense_name:
+            logger.info(f"🔍 Processing expense: '{expense_name}' = ${amount:,.2f}")
+        
         # Extract account number from start of name (e.g., "6001 Some Expense" -> 6001)
         match = re.match(r'^(\d{3,4})', expense_name)
         
         if match and amount < threshold:
             account_num = int(match.group(1))
+            
+            # Debug logging for account 8500
+            if account_num == 8500:
+                logger.info(f"🔍 Account 8500 found: amount=${amount:,.2f}, threshold=${threshold:,.2f}")
             
             # Check which group this account belongs to
             grouped = False
@@ -58,9 +70,23 @@ def group_expenses_by_account_number(expense_categories: Dict[str, float]) -> Di
             # If not in any group range, keep as individual
             if not grouped:
                 grouped_expenses[expense_name] = amount
+                if account_num == 8500:
+                    logger.info(f"✅ Account 8500 kept as individual expense: '{expense_name}' = ${amount:,.2f}")
         else:
             # Amount >= threshold OR no account number found - keep as individual
             grouped_expenses[expense_name] = amount
+            if '8500' in expense_name or 'GA Travel' in expense_name:
+                reason = "amount >= threshold" if match and amount >= threshold else "no account number found"
+                logger.info(f"✅ Account 8500 kept as individual (reason: {reason}): '{expense_name}' = ${amount:,.2f}")
+    
+    logger.info(f"After grouping: {len(grouped_expenses)} expenses remain")
+    if any('8500' in name or 'GA Travel' in name for name in grouped_expenses.keys()):
+        logger.info(f"✅ Account 8500 found in final grouped expenses")
+        for name, amt in grouped_expenses.items():
+            if '8500' in name or 'GA Travel' in name:
+                logger.info(f"  - '{name}': ${amt:,.2f}")
+    else:
+        logger.warning(f"⚠️ Account 8500 NOT found in final grouped expenses")
     
     return grouped_expenses
 
