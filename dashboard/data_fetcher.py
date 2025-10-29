@@ -971,9 +971,10 @@ class QBODataFetcher:
                     header_col_data = row['Header']['ColData']
                     if len(header_col_data) >= 2 and header_col_data[1].get('value'):
                         # Process the header as an expense/income item
+                        # Set type to 'Data' (not 'Section') so it doesn't get skipped
                         header_row = {
                             'ColData': header_col_data,
-                            'type': row.get('type', 'Data'),
+                            'type': 'Data',  # Force to 'Data' so Header values are processed
                             'group': current_group
                         }
                         self._parse_row_data(header_row, income_sources, expense_categories, current_group)
