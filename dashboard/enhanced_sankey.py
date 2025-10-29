@@ -121,7 +121,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     
     fig.update_layout(
         title_text=title_text,
-        font_size=14,  # Reduced font size for better readability
+        font_size=10,  # Smaller font size for better readability and compact display
         height=800,   # Increased height for better text visibility
         width=None,   # Let it be responsive to container width
         margin=dict(l=60, r=60, t=100, b=60),  # Reduced margins for more diagram space
