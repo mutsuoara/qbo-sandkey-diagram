@@ -99,7 +99,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             line = dict(color = "black", width = 1),
             label = node_labels,
             color = node_colors,
-            x = [0.05, 0.5, 0.95],  # Spread even wider across width
+            x = [0.15, 0.5, 0.85],  # More centered positioning for responsive layout
             y = None  # Auto-arrange vertically
         ),
         link = dict(
@@ -123,7 +123,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         title_text=title_text,
         font_size=16,  # Slightly smaller font for better fit
         height=700,   # Fixed shorter height
-        width=1600,   # Fixed wider width
+        width=None,   # Let it be responsive to container width
         margin=dict(l=60, r=60, t=100, b=60),  # Reduced margins for more diagram space
         plot_bgcolor='white',
         paper_bgcolor='white',
@@ -133,7 +133,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
         # Make it responsive
-        autosize=False,  # Disable autosize for precise control
+        autosize=True,  # Enable responsive sizing
         # Enable zoom and pan
         dragmode='zoom',
         # Add zoom controls
@@ -238,7 +238,7 @@ def create_sample_sankey_diagram(start_date=None, end_date=None):
             line = dict(color = "black", width = 1),
             label = node_labels,
             color = node_colors,
-            x = [0.05, 0.5, 0.95],  # Spread even wider across width
+            x = [0.15, 0.5, 0.85],  # More centered positioning for responsive layout
             y = None  # Auto-arrange vertically
         ),
         link = dict(
