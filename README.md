@@ -33,6 +33,34 @@ A secure, standalone desktop application that extracts data from QuickBooks Onli
    ```
    Open your browser to `http://localhost:8050`
 
+## Building Standalone Executables
+
+To create standalone executables for Windows, macOS, and Linux:
+
+1. **Navigate to the build folder**:
+   ```bash
+   cd build/
+   ```
+
+2. **Run the universal build script**:
+   ```bash
+   python build_universal.py
+   ```
+
+3. **Or use platform-specific scripts**:
+   ```bash
+   # Windows
+   build.bat
+   
+   # macOS
+   ./build_macos.sh
+   
+   # Linux
+   python3 build_cross_platform.py
+   ```
+
+See `build/README.md` for detailed build instructions and documentation.
+
 ## Development
 
 This project follows a ground-up development approach with security and user experience built in from the start.
