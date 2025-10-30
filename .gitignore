@@ -29,9 +29,23 @@ wheels/
 *.egg
 MANIFEST
 
-# PyInstaller
+# PyInstaller and Build Artifacts
 *.manifest
 *.spec
+build/
+dist/
+*.exe
+*.app
+*.dmg
+*.pkg
+*.deb
+*.rpm
+*.tar.gz
+*.zip
+
+# Build output directories
+QBO_Sankey_Dashboard_Portable_*/
+QBO_Sankey_Dashboard_*/
 
 # IDE
 .vscode/

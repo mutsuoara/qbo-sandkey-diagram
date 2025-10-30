@@ -962,9 +962,24 @@ class QBODataFetcher:
                 # Get the group context from the row
                 current_group = row.get('group', parent_group)
                 
-                # **REPLACE THE EXISTING CODE WITH THIS:**
-                # If this row has nested data, DON'T process it as a data row
-                # Only process the nested rows (the details), not the parent
+                # **HANDLE HEADER ROWS WITH NESTED DATA:**
+                # If this row has a Header with ColData AND nested rows, process both:
+                # 1. The Header value (e.g., "8500 GA Travel" = $687.30)
+                # 2. The nested rows (e.g., "8505.01 GA Auto - Teeple" = $19,332.54)
+                if 'Header' in row and 'ColData' in row['Header']:
+                    # Check if Header has a value (not just a name)
+                    header_col_data = row['Header']['ColData']
+                    if len(header_col_data) >= 2 and header_col_data[1].get('value'):
+                        # Process the header as an expense/income item
+                        # Set type to 'Data' (not 'Section') so it doesn't get skipped
+                        header_row = {
+                            'ColData': header_col_data,
+                            'type': 'Data',  # Force to 'Data' so Header values are processed
+                            'group': current_group
+                        }
+                        self._parse_row_data(header_row, income_sources, expense_categories, current_group)
+                
+                # Process nested rows if they exist
                 if 'Rows' in row:
                     nested_rows = row['Rows']
                     if isinstance(nested_rows, dict) and 'Row' in nested_rows:
@@ -973,7 +988,6 @@ class QBODataFetcher:
                     elif isinstance(nested_rows, list):
                         for subrow in nested_rows:
                             self._parse_nested_row(subrow, income_sources, expense_categories, current_group)
-                    # Don't process ColData here - it would be a summary of the nested rows
                     return
                 
                 # Only process ColData if there are NO nested rows

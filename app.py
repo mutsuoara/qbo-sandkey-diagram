@@ -260,7 +260,7 @@ def create_oauth_page(auth_url, environment):
 app.layout = html.Div([
     dcc.Location(id='url', refresh=False),
     html.Div(id="main-content", 
-             style={'padding': '20px', 'maxWidth': '1200px', 'margin': '0 auto'}),
+             style={'padding': '20px', 'maxWidth': '95vw', 'width': '95vw', 'margin': '0 auto'}),
     html.Footer([
         html.P("QBO Sankey Dashboard - Secure Financial Visualization", 
                style={'textAlign': 'center', 'color': '#7f8c8d', 'margin': '0'})
