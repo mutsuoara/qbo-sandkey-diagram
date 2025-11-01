@@ -5,6 +5,7 @@ Handles API calls to retrieve financial data from QuickBooks Online.
 
 import requests
 import logging
+import re
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timedelta
 import json
@@ -771,106 +772,306 @@ class QBODataFetcher:
     
     def _parse_profit_loss_report(self, pl_data: Dict) -> Optional[Dict[str, Any]]:
         """
-        Parse QuickBooks Profit & Loss report data
-        
-        Args:
-            pl_data: Raw P&L report data from QBO API
-            
-        Returns:
-            Parsed financial data for Sankey diagram
+        Parse QuickBooks Profit & Loss report with hierarchical structure
+        Tailored to actual QBO data structure with proper primary/secondary/tertiary detection
         """
         try:
+            logger.info("="*80)
+            logger.info("PARSING P&L REPORT WITH HIERARCHY")
+            logger.info("="*80)
+            
             income_sources = {}
-            expense_categories = {}
+            expense_hierarchy = {}
             
-            logger.info(f"Parsing P&L report structure: {list(pl_data.keys())}")
-            
-            # Navigate through the report structure - QBO API format
-            # The response has ['Header', 'Columns', 'Rows'] directly, not wrapped in 'Report'
-            if 'Rows' in pl_data:
-                rows_data = pl_data['Rows']
-                logger.info(f"Rows type: {type(rows_data)}")
-                
-                # Handle the actual QBO structure: Rows contains a 'Row' key with the actual data
-                if isinstance(rows_data, dict) and 'Row' in rows_data:
-                    rows = rows_data['Row']
-                    logger.info(f"Found {len(rows)} rows in report")
-                elif isinstance(rows_data, list):
-                    rows = rows_data
-                    logger.info(f"Found {len(rows)} rows in report (direct list)")
-                else:
-                    logger.error(f"Unexpected Rows structure: {type(rows_data)} - {rows_data}")
-                    return None
-                
-                for i, row in enumerate(rows):
-                    logger.info(f"Row {i}: {list(row.keys()) if isinstance(row, dict) else type(row)}")
-                    
-                    # Log the full row structure for debugging
-                    if isinstance(row, dict):
-                        logger.info(f"Row {i} full structure: {row}")
-                        
-                        # **SKIP "Other Expenses" GROUP - these are typically unallowable costs**
-                        if row.get('group') == 'OtherExpenses':
-                            logger.info(f"Skipping 'Other Expenses' section (unallowable costs)")
-                            continue
-                    
-                    # Handle different row structures
-                    if isinstance(row, dict):
-                        if 'ColData' in row:
-                            # Standard row format
-                            logger.info(f"Processing standard row {i} with ColData")
-                            self._parse_row_data(row, income_sources, expense_categories)
-                        elif 'Rows' in row:
-                            # Nested rows (subcategories) - handle the QBO structure
-                            logger.info(f"Found nested rows in row {i}")
-                            nested_rows = row['Rows']
-                            
-                            # Handle nested Row structure
-                            if isinstance(nested_rows, dict) and 'Row' in nested_rows:
-                                nested_row_list = nested_rows['Row']
-                                logger.info(f"Nested rows count: {len(nested_row_list)}")
-                                for j, subrow in enumerate(nested_row_list):
-                                    logger.info(f"Subrow {j}: {list(subrow.keys()) if isinstance(subrow, dict) else type(subrow)}")
-                                    self._parse_nested_row(subrow, income_sources, expense_categories, row.get('group'))
-                            elif isinstance(nested_rows, list):
-                                logger.info(f"Nested rows count: {len(nested_rows)}")
-                                for j, subrow in enumerate(nested_rows):
-                                    logger.info(f"Subrow {j}: {list(subrow.keys()) if isinstance(subrow, dict) else type(subrow)}")
-                                    self._parse_nested_row(subrow, income_sources, expense_categories, row.get('group'))
-                        elif 'group' in row:
-                            # Group header
-                            logger.info(f"Group: {row.get('group', 'Unknown')}")
-                            if 'Rows' in row:
-                                self._parse_nested_row(row, income_sources, expense_categories, row.get('group'))
-            else:
-                logger.warning("No 'Rows' found in response")
+            if 'Rows' not in pl_data:
+                logger.warning("No 'Rows' found in P&L data")
                 return None
             
-            # If no data found, try alternative parsing
-            if not income_sources and not expense_categories:
-                logger.warning("No financial data found in P&L report, trying alternative parsing")
-                # Check if this is a summary-only report (common for periods with no data)
-                if self._is_summary_only_report(pl_data):
-                    logger.info("Detected summary-only report - likely no transactions in this date range")
-                    logger.info("This usually means no financial activity occurred in the selected date range")
-                    sample_data = self._get_sample_financial_data()
-                    sample_data['is_sample_data'] = True
-                    return sample_data  # Use sample data for empty periods
-                return self._parse_alternative_report_structure(pl_data)
+            # Extract rows
+            rows_data = pl_data['Rows']
+            if isinstance(rows_data, dict) and 'Row' in rows_data:
+                rows = rows_data['Row']
+            elif isinstance(rows_data, list):
+                rows = rows_data
+            else:
+                logger.error(f"Unexpected Rows structure: {type(rows_data)}")
+                return None
             
-            logger.info(f"Parsed data - Income sources: {len(income_sources)}, Expenses: {len(expense_categories)}")
+            logger.info(f"Processing {len(rows)} top-level rows")
+            
+            # Process each top-level section
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                
+                # **SKIP "Other Expenses" GROUP - these are typically unallowable costs**
+                if row.get('group') == 'OtherExpenses':
+                    logger.info(f"Skipping 'Other Expenses' section (unallowable costs)")
+                    continue
+                
+                section_type = self._get_section_type(row)
+                logger.info(f"Processing section: {section_type}")
+                
+                if section_type == 'Income':
+                    self._parse_income_section(row, income_sources)
+                elif section_type in ['Cost of Goods Sold', 'Expenses']:
+                    self._parse_expense_section(row, expense_hierarchy)
+            
+            # Calculate totals
+            total_revenue = sum(income_sources.values())
+            total_expenses = self._calculate_hierarchy_total(expense_hierarchy)
+            net_income = total_revenue - total_expenses
+            
+            logger.info("="*80)
+            logger.info(f"PARSING COMPLETE:")
+            logger.info(f"  Income sources: {len(income_sources)}")
+            logger.info(f"  Expense primaries: {len(expense_hierarchy)}")
+            logger.info(f"  Total Revenue: ${total_revenue:,.2f}")
+            logger.info(f"  Total Expenses: ${total_expenses:,.2f}")
+            logger.info(f"  Net Income: ${net_income:,.2f}")
+            logger.info("="*80)
+            
+            # Convert expense hierarchy to flat structure for compatibility with existing code
+            expense_categories = {}
+            for primary_name, primary_data in expense_hierarchy.items():
+                # Add primary total if it has a direct amount
+                if primary_data.get('total', 0) != 0:
+                    expense_categories[primary_name] = primary_data['total']
+                
+                # Flatten secondaries and tertiaries
+                for secondary_name, secondary_data in primary_data.get('secondary', {}).items():
+                    if secondary_data.get('total', 0) != 0:
+                        expense_categories[secondary_name] = secondary_data['total']
+                    
+                    # Add tertiaries
+                    for tertiary_name, tertiary_amount in secondary_data.get('tertiary', {}).items():
+                        if tertiary_amount != 0:
+                            expense_categories[tertiary_name] = tertiary_amount
             
             return {
                 'income': income_sources,
-                'expenses': expense_categories,
-                'total_revenue': sum(income_sources.values()),
-                'total_expenses': sum(expense_categories.values()),
-                'net_income': sum(income_sources.values()) - sum(expense_categories.values())
+                'expenses': expense_categories,  # Flattened for compatibility
+                'expense_hierarchy': expense_hierarchy,  # Hierarchical structure for testing
+                'total_revenue': total_revenue,
+                'total_expenses': total_expenses,
+                'net_income': net_income
             }
             
         except Exception as e:
             logger.error(f"Error parsing P&L report: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return None
+    
+    def _get_section_type(self, row: Dict) -> Optional[str]:
+        """Get the type of top-level section (Income, COGS, Expenses, etc.)"""
+        if 'Header' in row:
+            col_data = row['Header'].get('ColData', [])
+            if col_data:
+                name = col_data[0].get('value', '').strip()
+                return name
+        return None
+    
+    def _parse_income_section(self, row: Dict, income_sources: Dict):
+        """Parse the Income section"""
+        if 'Rows' not in row:
+            return
+        
+        rows = self._extract_rows(row['Rows'])
+        
+        for income_row in rows:
+            name, amount = self._extract_row_data(income_row)
+            if name and amount != 0:
+                logger.info(f"  Income: {name} = ${amount:,.2f}")
+                income_sources[name] = amount
+    
+    def _parse_expense_section(self, row: Dict, expense_hierarchy: Dict):
+        """
+        Parse expense sections (COGS, Expenses)
+        
+        Structure:
+        - Level 1: Primary categories (5000 COGS, 6000 Fringe, etc.) - Sections with $0
+        - Level 2: Secondary categories (5001, 6001, etc.) - Data rows with amounts
+        - Level 3: Tertiary items (6205, 6253, etc.) - Data rows under nested Sections
+        """
+        if 'Rows' not in row:
+            return
+        
+        rows = self._extract_rows(row['Rows'])
+        
+        for primary_row in rows:
+            # Skip if not a row dict
+            if not isinstance(primary_row, dict):
+                continue
+            
+            # Check if this is a primary category (Section with account number ending in 000)
+            if primary_row.get('type') == 'Section':
+                primary_name, primary_amount = self._extract_row_data(primary_row)
+                
+                if not primary_name:
+                    continue
+                
+                # Extract account number
+                match = re.match(r'^(\d{4})', primary_name)
+                account_num = match.group(1) if match else None
+                
+                # Check if it's a primary (ends in 000 or has nested rows)
+                is_primary = (
+                    (account_num and account_num.endswith('000')) or
+                    ('Rows' in primary_row)
+                )
+                
+                if is_primary:
+                    logger.info(f"PRIMARY: {primary_name}")
+                    
+                    # Initialize primary
+                    expense_hierarchy[primary_name] = {
+                        'total': 0,  # Will calculate from children
+                        'secondary': {}
+                    }
+                    
+                    # Parse secondaries under this primary
+                    if 'Rows' in primary_row:
+                        self._parse_secondaries(
+                            primary_row, 
+                            primary_name,
+                            expense_hierarchy[primary_name]
+                        )
+    
+    def _parse_secondaries(self, primary_row: Dict, primary_name: str, primary_data: Dict):
+        """Parse secondary categories under a primary"""
+        rows = self._extract_rows(primary_row['Rows'])
+        
+        for secondary_row in rows:
+            if not isinstance(secondary_row, dict):
+                continue
+            
+            row_type = secondary_row.get('type', '')
+            
+            # Check if this is a nested Section (like 6200 Employee Benefits or 8500 GA Travel)
+            if row_type == 'Section':
+                # This is a secondary with potential tertiaries
+                secondary_name, secondary_amount = self._extract_row_data(secondary_row)
+                
+                if not secondary_name:
+                    continue
+                
+                logger.info(f"  SECONDARY (Section): {secondary_name}")
+                
+                # Initialize secondary
+                primary_data['secondary'][secondary_name] = {
+                    'total': 0,  # Will calculate from tertiaries
+                    'tertiary': {}
+                }
+                
+                # Parse tertiaries under this secondary
+                if 'Rows' in secondary_row:
+                    self._parse_tertiaries(
+                        secondary_row,
+                        secondary_name,
+                        primary_data['secondary'][secondary_name]
+                    )
+                
+            else:
+                # This is a simple secondary (Data row)
+                secondary_name, secondary_amount = self._extract_row_data(secondary_row)
+                
+                if not secondary_name or secondary_amount == 0:
+                    continue
+                
+                logger.info(f"  SECONDARY (Data): {secondary_name} = ${secondary_amount:,.2f}")
+                
+                # Add as secondary with no tertiaries
+                primary_data['secondary'][secondary_name] = {
+                    'total': secondary_amount,
+                    'tertiary': {}
+                }
+        
+        # Calculate primary total from secondaries
+        primary_data['total'] = sum(
+            sec['total'] for sec in primary_data['secondary'].values()
+        )
+    
+    def _parse_tertiaries(self, secondary_row: Dict, secondary_name: str, secondary_data: Dict):
+        """Parse tertiary items under a secondary Section"""
+        
+        def extract_all_tertiaries(row, depth=0):
+            """Recursively extract all tertiary items (handles deep nesting like 8505.01)"""
+            if 'Rows' not in row:
+                return
+            
+            rows = self._extract_rows(row['Rows'])
+            
+            for tertiary_row in rows:
+                if not isinstance(tertiary_row, dict):
+                    continue
+                
+                # If this is a Section, recurse deeper
+                if tertiary_row.get('type') == 'Section':
+                    extract_all_tertiaries(tertiary_row, depth + 1)
+                else:
+                    # This is a Data row - extract it
+                    tertiary_name, tertiary_amount = self._extract_row_data(tertiary_row)
+                    
+                    if tertiary_name and tertiary_amount != 0:
+                        logger.info(f"    TERTIARY: {tertiary_name} = ${tertiary_amount:,.2f}")
+                        secondary_data['tertiary'][tertiary_name] = tertiary_amount
+        
+        # Extract all tertiaries (handles nested Sections)
+        extract_all_tertiaries(secondary_row)
+        
+        # Calculate secondary total from tertiaries
+        secondary_data['total'] = sum(secondary_data['tertiary'].values())
+    
+    def _extract_rows(self, rows_data) -> list:
+        """Extract rows list from Rows structure"""
+        if isinstance(rows_data, dict) and 'Row' in rows_data:
+            return rows_data['Row']
+        elif isinstance(rows_data, list):
+            return rows_data
+        return []
+    
+    def _extract_row_data(self, row: Dict) -> tuple:
+        """Extract name and amount from a row"""
+        name = None
+        amount = 0
+        
+        # Try Header first (for Section rows)
+        if 'Header' in row:
+            col_data = row['Header'].get('ColData', [])
+            if len(col_data) >= 2:
+                name = col_data[0].get('value', '').strip()
+                amount_str = col_data[1].get('value', '0').replace(',', '').replace('$', '')
+                try:
+                    amount = float(amount_str) if amount_str else 0.0
+                except ValueError:
+                    amount = 0.0
+        
+        # Try ColData (for Data rows)
+        elif 'ColData' in row:
+            col_data = row['ColData']
+            if len(col_data) >= 2:
+                name = col_data[0].get('value', '').strip()
+                amount_str = col_data[1].get('value', '0').replace(',', '').replace('$', '')
+                try:
+                    amount = float(amount_str) if amount_str else 0.0
+                except ValueError:
+                    amount = 0.0
+        
+        # Skip summary rows
+        if name:
+            skip_keywords = ['total', 'subtotal', 'net income', 'gross profit']
+            if any(keyword in name.lower() for keyword in skip_keywords):
+                return None, 0
+        
+        return name, amount
+    
+    def _calculate_hierarchy_total(self, hierarchy: Dict) -> float:
+        """Calculate total from hierarchical expense structure"""
+        total = 0
+        for primary_data in hierarchy.values():
+            total += primary_data.get('total', 0)
+        return total
     
     def _parse_row_data(self, row: Dict, income_sources: Dict, expense_categories: Dict, parent_group: str = None):
         """Parse individual row data from P&L report"""

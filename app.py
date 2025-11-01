@@ -959,6 +959,91 @@ def test_project_income():
     except Exception as e:
         return {"error": str(e)}
 
+@app.server.route('/test/hierarchy-parser')
+def test_hierarchy_parser():
+    """Test the new hierarchical parser"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime, timedelta
+    from flask import jsonify
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        if not tokens:
+            return jsonify({"error": "No tokens found"})
+        
+        environment = credentials.get('environment', 'sandbox')
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=environment
+        )
+        
+        # Get last 90 days
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)
+        
+        # Get P&L report and parse with hierarchy
+        pl_data = data_fetcher.get_profit_and_loss(
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d')
+        )
+        
+        if not pl_data:
+            return jsonify({"error": "Failed to fetch P&L report"})
+        
+        # Parse with hierarchy preserved
+        financial_data = data_fetcher._parse_profit_loss_report(pl_data)
+        
+        if not financial_data:
+            return jsonify({"error": "Failed to parse P&L report"})
+        
+        # Get hierarchical structure
+        expense_hierarchy = financial_data.get('expense_hierarchy', {})
+        
+        # Format for display
+        result = {
+            "success": True,
+            "summary": {
+                "total_revenue": financial_data.get('total_revenue', 0),
+                "total_expenses": financial_data.get('total_expenses', 0),
+                "net_income": financial_data.get('net_income', 0),
+                "income_count": len(financial_data.get('income', {})),
+                "expense_primaries": len(expense_hierarchy)
+            },
+            "income": financial_data.get('income', {}),
+            "expenses": {}
+        }
+        
+        # Format expenses to show structure
+        for primary_name, primary_data in expense_hierarchy.items():
+            result["expenses"][primary_name] = {
+                "total": primary_data.get('total', 0),
+                "secondary_count": len(primary_data.get('secondary', {})),
+                "secondaries": {}
+            }
+            
+            for sec_name, sec_data in primary_data.get('secondary', {}).items():
+                result["expenses"][primary_name]["secondaries"][sec_name] = {
+                    "total": sec_data.get('total', 0),
+                    "tertiary_count": len(sec_data.get('tertiary', {})),
+                    "tertiaries": sec_data.get('tertiary', {})
+                }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error testing parser: {e}")
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
+
 def exchange_code_for_token(code, credentials):
     """Exchange authorization code for access token"""
     try:
