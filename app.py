@@ -709,6 +709,214 @@ def oauth_callback():
         logger.error(f"OAuth callback error: {e}")
         return redirect('/?auth=error')
 
+# Add this AFTER the oauth_callback() function and BEFORE the test_project_income route
+@app.server.route('/debug/pl-structure')
+def debug_pl_structure():
+    """Debug endpoint to see raw P&L structure from QuickBooks"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime, timedelta
+    import json
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        if not tokens:
+            return {"error": "No tokens found - please authenticate with QuickBooks first"}
+        
+        environment = credentials.get('environment', 'sandbox')
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=environment
+        )
+        
+        # Get last 90 days of data
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)
+        
+        logger.info(f"Fetching P&L data from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+        
+        pl_data = data_fetcher.get_profit_and_loss(
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d')
+        )
+        
+        if not pl_data:
+            return {"error": "No P&L data returned from QuickBooks"}
+        
+        # Save to file for inspection
+        output_file = 'pl_structure_debug.json'
+        with open(output_file, 'w') as f:
+            json.dump(pl_data, f, indent=2)
+        
+        logger.info(f"P&L structure saved to {output_file}")
+        
+        # Return summary
+        return {
+            "success": True,
+            "message": f"P&L structure saved to {output_file}",
+            "file_location": output_file,
+            "data_keys": list(pl_data.keys()) if isinstance(pl_data, dict) else "Not a dict",
+            "preview": str(pl_data)[:500] + "..."
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in debug endpoint: {e}")
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
+@app.server.route('/debug/account-analysis')
+def debug_account_analysis():
+    """Analyze account numbers and their hierarchy"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime, timedelta
+    import json
+    import re
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        if not tokens:
+            return {"error": "No tokens found"}
+        
+        environment = credentials.get('environment', 'sandbox')
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=environment
+        )
+        
+        # Get P&L data
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)
+        
+        pl_data = data_fetcher.get_profit_and_loss(
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d')
+        )
+        
+        if not pl_data:
+            return {"error": "No P&L data returned"}
+        
+        # Collect all accounts
+        all_accounts = []
+        
+        def extract_accounts(data, level=0):
+            """Recursively extract all accounts"""
+            if not isinstance(data, dict):
+                return
+            
+            if 'Rows' in data:
+                rows_data = data['Rows']
+                if isinstance(rows_data, dict) and 'Row' in rows_data:
+                    rows = rows_data['Row']
+                elif isinstance(rows_data, list):
+                    rows = rows_data
+                else:
+                    return
+                
+                for row in rows:
+                    if not isinstance(row, dict):
+                        continue
+                    
+                    # Try to get account name and amount
+                    name = None
+                    amount = 0
+                    
+                    if 'Header' in row:
+                        col_data = row['Header'].get('ColData', [])
+                        if len(col_data) >= 2:
+                            name = col_data[0].get('value', '')
+                            amount_str = col_data[1].get('value', '0').replace(',', '').replace('$', '')
+                            try:
+                                amount = float(amount_str)
+                            except:
+                                amount = 0
+                    elif 'ColData' in row:
+                        col_data = row['ColData']
+                        if len(col_data) >= 2:
+                            name = col_data[0].get('value', '')
+                            amount_str = col_data[1].get('value', '0').replace(',', '').replace('$', '')
+                            try:
+                                amount = float(amount_str)
+                            except:
+                                amount = 0
+                    
+                    if name:
+                        # Extract account number
+                        match = re.match(r'^(\d{4,5})(\.\d{1,2})?\s+', name)
+                        account_num = match.group(1) if match else None
+                        
+                        all_accounts.append({
+                            'name': name,
+                            'amount': amount,
+                            'account_number': account_num,
+                            'level': level,
+                            'row_type': row.get('type', 'unknown')
+                        })
+                    
+                    # Recurse
+                    if 'Rows' in row:
+                        extract_accounts(row, level + 1)
+        
+        extract_accounts(pl_data)
+        
+        # Analyze account numbers
+        account_prefixes = {}
+        for acc in all_accounts:
+            if acc['account_number']:
+                prefix = acc['account_number'][:2]  # First 2 digits
+                if prefix not in account_prefixes:
+                    account_prefixes[prefix] = []
+                account_prefixes[prefix].append(acc)
+        
+        # Save detailed analysis
+        analysis = {
+            'total_accounts': len(all_accounts),
+            'accounts_with_numbers': len([a for a in all_accounts if a['account_number']]),
+            'unique_prefixes': list(account_prefixes.keys()),
+            'accounts_by_prefix': {
+                prefix: [
+                    f"{acc['account_number']} - {acc['name'][:50]} (${acc['amount']:,.0f})"
+                    for acc in accounts
+                ]
+                for prefix, accounts in account_prefixes.items()
+            },
+            'all_accounts': all_accounts
+        }
+        
+        with open('account_analysis.json', 'w') as f:
+            json.dump(analysis, f, indent=2)
+        
+        return {
+            "success": True,
+            "message": "Account analysis saved to account_analysis.json",
+            "summary": {
+                "total_accounts": analysis['total_accounts'],
+                "accounts_with_numbers": analysis['accounts_with_numbers'],
+                "prefixes_found": analysis['unique_prefixes']
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in account analysis: {e}")
+        import traceback
+        return {
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        }
+
 @app.server.route('/test/projects')
 def test_project_income():
     """Test endpoint to verify project income fetching"""
@@ -930,6 +1138,46 @@ def update_sankey_chart(apply_clicks, ytd_clicks, last30_clicks, last90_clicks, 
         logger.error(f"Error fetching real data for date range: {e}")
         # Fallback to sample data
         return create_sample_sankey_diagram(start_date, end_date)
+
+@app.server.route('/debug/download-pl')
+def download_pl_structure():
+    """Download the P&L structure debug file"""
+    import os
+    from flask import send_file, jsonify
+    
+    file_path = 'pl_structure_debug.json'
+    
+    if os.path.exists(file_path):
+        return send_file(
+            file_path,
+            mimetype='application/json',
+            as_attachment=True,
+            download_name='pl_structure_debug.json'
+        )
+    else:
+        return jsonify({
+            "error": "File not found. Generate it first by visiting /debug/pl-structure"
+        })
+
+@app.server.route('/debug/download-analysis')
+def download_account_analysis():
+    """Download the account analysis debug file"""
+    import os
+    from flask import send_file, jsonify
+    
+    file_path = 'account_analysis.json'
+    
+    if os.path.exists(file_path):
+        return send_file(
+            file_path,
+            mimetype='application/json',
+            as_attachment=True,
+            download_name='account_analysis.json'
+        )
+    else:
+        return jsonify({
+            "error": "File not found. Generate it first by visiting /debug/account-analysis"
+        })
 
 # Callback to set default date values
 @app.callback(
