@@ -136,10 +136,12 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     
     # Income sources (left column, x=0)
     income_indices = {}
+    node_customdata = []  # Store tertiary data for hover tooltips
     for i, (source, amount) in enumerate(income_sources.items()):
         node_labels.append(f"{source}<br>${amount:,.0f}")
         node_colors.append("#27ae60")  # Green for income
         node_x_positions.append(0.0)
+        node_customdata.append(None)  # No custom hover for income
         income_indices[source] = i
     
     # Total revenue (center column, x=0.33)
@@ -148,6 +150,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     node_labels.append(f"<b>Total Revenue</b><br>${total_revenue:,.0f}{net_income_text}")
     node_colors.append("#3498db")  # Blue for total revenue
     node_x_positions.append(0.33)
+    node_customdata.append(None)  # No custom hover for total revenue
     
     # Process hierarchical expenses
     primary_indices = {}  # Map primary names to node indices
@@ -167,14 +170,15 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e67e22")  # Orange for primary categories
                     node_x_positions.append(0.67)
+                    node_customdata.append(None)  # No hover for primary nodes
                     primary_indices[primary_name] = idx
                     logger.info(f"  Created primary node: {primary_name} (idx={idx})")
         
-        # Second pass: Create secondary/tertiary nodes (x=1.0)
+        # Second pass: Create secondary nodes (x=1.0) - tertiaries go in hover tooltips
         for primary_name, primary_data in expense_hierarchy.items():
             secondaries = primary_data.get('secondary', {})
             if secondaries:
-                # This primary has secondaries - create secondary nodes
+                # This primary has secondaries - create secondary nodes with tertiary hover data
                 for sec_name, sec_data in secondaries.items():
                     sec_amount = sec_data.get('total', 0)
                     if sec_amount > 0:
@@ -182,8 +186,34 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                         node_labels.append(f"{sec_name}<br>${sec_amount:,.0f}")
                         node_colors.append("#e74c3c")  # Red for secondary expenses
                         node_x_positions.append(1.0)
+                        
+                        # Get tertiary items for hover tooltip
+                        tertiaries = sec_data.get('tertiary', {})
+                        if tertiaries:
+                            # Format tertiary breakdown for hover - show top 10, then "and X more" if needed
+                            sorted_tertiaries = sorted(tertiaries.items(), key=lambda x: x[1], reverse=True)
+                            tertiary_lines = []
+                            max_items = 10
+                            
+                            for tert_name, tert_amount in sorted_tertiaries[:max_items]:
+                                tertiary_lines.append(f"• {tert_name}: ${tert_amount:,.0f}")
+                            
+                            # If more than 10, show "...and X more items ($XX,XXX total)"
+                            remaining_count = len(sorted_tertiaries) - max_items
+                            if remaining_count > 0:
+                                remaining_total = sum(amount for _, amount in sorted_tertiaries[max_items:])
+                                tertiary_lines.append(f"...and {remaining_count} more item{'s' if remaining_count > 1 else ''}: ${remaining_total:,.0f}")
+                            
+                            # Create hover text with tertiary breakdown
+                            hover_text = f"<b>{sec_name}</b><br>Total: ${sec_amount:,.0f}<br><br><b>Breakdown:</b><br>" + "<br>".join(tertiary_lines)
+                            node_customdata.append(hover_text)
+                            logger.info(f"    Created secondary node with {len(tertiaries)} tertiaries: {sec_name} (idx={idx})")
+                        else:
+                            # No tertiaries - standard hover (use None for default behavior)
+                            node_customdata.append(None)
+                            logger.info(f"    Created secondary node: {sec_name} (idx={idx})")
+                        
                         secondary_indices[(primary_name, sec_name)] = idx
-                        logger.info(f"    Created secondary node: {sec_name} (idx={idx})")
             else:
                 # Primary has no secondaries - create direct expense node (x=1.0)
                 primary_amount = primary_data.get('total', 0)
@@ -192,6 +222,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e74c3c")  # Red for expenses
                     node_x_positions.append(1.0)
+                    node_customdata.append(None)  # No custom hover
                     primary_indices[primary_name] = idx  # Direct link from Total Revenue
                     logger.info(f"  Created direct expense node: {primary_name} (idx={idx})")
     else:
@@ -205,6 +236,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             node_labels.append(f"{expense}<br>${amount:,.0f}")
             node_colors.append("#e74c3c")  # Red for expenses
             node_x_positions.append(1.0)
+            node_customdata.append(None)  # No custom hover for flat structure
             primary_indices[expense] = idx  # Use same dict for flat structure
     
     # Net Income is now displayed as text below Total Revenue, not as a separate node
@@ -285,6 +317,17 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # To make Total Revenue appear larger, we increase global thickness
     # The center node (Total Revenue) will benefit from this since it has the most connections
     
+    # Create hover templates - use customdata (tertiary breakdown) if available, otherwise default
+    # Plotly Sankey supports per-node hovertemplate - use conditional logic
+    hovertemplates = []
+    for i, custom_data in enumerate(node_customdata):
+        if custom_data:
+            # Custom hover with tertiary breakdown - customdata contains full HTML
+            hovertemplates.append("%{customdata}<extra></extra>")
+        else:
+            # Default hover showing label and value
+            hovertemplates.append("%{label}<br>%{value}<extra></extra>")
+    
     # Create the enhanced Sankey diagram
     fig = go.Figure(data=[go.Sankey(
         node = dict(
@@ -294,7 +337,9 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             label = node_labels,
             color = node_colors,
             x = node_x_positions if node_x_positions else [0.15, 0.5, 0.85],  # Use hierarchical positions if available
-            y = None  # Auto-arrange vertically
+            y = None,  # Auto-arrange vertically
+            customdata = node_customdata,  # Custom data for hover tooltips (None for nodes without tertiaries)
+            hovertemplate = hovertemplates  # Per-node hover templates
         ),
         link = dict(
             source = source_indices,
