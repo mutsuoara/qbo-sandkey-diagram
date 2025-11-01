@@ -724,10 +724,12 @@ class QBODataFetcher:
             pl_data = self.get_profit_and_loss(start_date, end_date)
             
             expense_categories = {}
+            expense_hierarchy = {}
             if pl_data:
                 parsed_data = self._parse_profit_loss_report(pl_data)
                 if parsed_data:
                     expense_categories = parsed_data.get('expenses', {})
+                    expense_hierarchy = parsed_data.get('expense_hierarchy', {})
             
             if not expense_categories:
                 logger.warning("No expense data found")
@@ -741,6 +743,7 @@ class QBODataFetcher:
             logger.info("Financial Data Summary:")
             logger.info(f"  Projects with income: {len(project_income)}")
             logger.info(f"  Expense categories: {len(expense_categories)}")
+            logger.info(f"  Expense primaries: {len(expense_hierarchy)}")
             logger.info(f"  Total revenue: ${total_revenue:,.2f}")
             logger.info(f"  Total expenses: ${total_expenses:,.2f}")
             logger.info(f"  Net income: ${net_income:,.2f}")
@@ -748,7 +751,8 @@ class QBODataFetcher:
             
             return {
                 'income': project_income,
-                'expenses': expense_categories,
+                'expenses': expense_categories,  # Flattened for compatibility
+                'expense_hierarchy': expense_hierarchy,  # Hierarchical structure for Sankey
                 'total_revenue': total_revenue,
                 'total_expenses': total_expenses,
                 'net_income': net_income,

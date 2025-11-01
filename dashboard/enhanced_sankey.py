@@ -104,53 +104,108 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     
     # Extract data from financial_data dictionary
     income_sources = financial_data.get('income', {})
-    expense_categories = financial_data.get('expenses', {})
+    expense_hierarchy = financial_data.get('expense_hierarchy', {})
+    expense_categories = financial_data.get('expenses', {})  # Fallback if hierarchy not available
     
-    # **GROUP EXPENSES** based on account numbers and amounts
-    if expense_categories:
+    # If no hierarchy, use flat structure (backward compatibility)
+    if not expense_hierarchy and expense_categories:
         expense_categories = group_expenses_by_account_number(expense_categories)
-        logger.info(f"After grouping: {len(expense_categories)} expense categories")
+        logger.info(f"Using flat expense structure: {len(expense_categories)} expense categories")
     
     # If no real data, log warning and return None
-    if not income_sources and not expense_categories:
+    if not income_sources and not expense_hierarchy and not expense_categories:
         logger.warning("No financial data available")
         return None
     
     # Ensure we have some data
     if not income_sources:
         income_sources = {"No Income Data": 0}
-    if not expense_categories:
-        expense_categories = {"No Expense Data": 0}
     
     # Calculate totals
     total_revenue = sum(income_sources.values())
-    total_expenses = sum(expense_categories.values())
+    if expense_hierarchy:
+        total_expenses = sum(prim_data.get('total', 0) for prim_data in expense_hierarchy.values())
+    else:
+        total_expenses = sum(expense_categories.values())
     adjusted_gross_income = total_revenue - total_expenses
     
     # Create nodes with dollar amounts as labels
     node_labels = []
     node_colors = []
+    node_x_positions = []  # X positions for hierarchical layout
     
-    # Income sources (left column)
-    for source, amount in income_sources.items():
+    # Income sources (left column, x=0)
+    income_indices = {}
+    for i, (source, amount) in enumerate(income_sources.items()):
         node_labels.append(f"{source}<br>${amount:,.0f}")
         node_colors.append("#27ae60")  # Green for income
+        node_x_positions.append(0.0)
+        income_indices[source] = i
     
-    # Total revenue (center column) with Net Income calculation below
-    # Note: Plotly Sankey doesn't support HTML in labels, so we'll make the text stand out with formatting
-    # The thickness will be increased separately below
+    # Total revenue (center column, x=0.33)
+    total_revenue_idx = len(income_sources)
     net_income_text = f"<br><br><b>Net Income:</b> ${adjusted_gross_income:,.0f}" if adjusted_gross_income != 0 else ""
     node_labels.append(f"<b>Total Revenue</b><br>${total_revenue:,.0f}{net_income_text}")
     node_colors.append("#3498db")  # Blue for total revenue
+    node_x_positions.append(0.33)
     
-    # Expense categories (right column) - Show grouped and individual expenses
-    expense_items = list(expense_categories.items())
-    # Sort by amount (descending) for better visual organization
-    expense_items = sorted(expense_items, key=lambda x: x[1], reverse=True)
+    # Process hierarchical expenses
+    primary_indices = {}  # Map primary names to node indices
+    secondary_indices = {}  # Map (primary_name, secondary_name) to node indices
     
-    for expense, amount in expense_items:
-        node_labels.append(f"{expense}<br>${amount:,.0f}")
-        node_colors.append("#e74c3c")  # Red for expenses
+    if expense_hierarchy:
+        logger.info(f"Building hierarchical Sankey structure with {len(expense_hierarchy)} primaries")
+        
+        # First pass: Create primary nodes for those with secondaries (x=0.67)
+        for primary_name, primary_data in expense_hierarchy.items():
+            secondaries = primary_data.get('secondary', {})
+            if secondaries:
+                # This primary has secondaries - create intermediate node
+                primary_amount = primary_data.get('total', 0)
+                if primary_amount > 0:
+                    idx = len(node_labels)
+                    node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
+                    node_colors.append("#e67e22")  # Orange for primary categories
+                    node_x_positions.append(0.67)
+                    primary_indices[primary_name] = idx
+                    logger.info(f"  Created primary node: {primary_name} (idx={idx})")
+        
+        # Second pass: Create secondary/tertiary nodes (x=1.0)
+        for primary_name, primary_data in expense_hierarchy.items():
+            secondaries = primary_data.get('secondary', {})
+            if secondaries:
+                # This primary has secondaries - create secondary nodes
+                for sec_name, sec_data in secondaries.items():
+                    sec_amount = sec_data.get('total', 0)
+                    if sec_amount > 0:
+                        idx = len(node_labels)
+                        node_labels.append(f"{sec_name}<br>${sec_amount:,.0f}")
+                        node_colors.append("#e74c3c")  # Red for secondary expenses
+                        node_x_positions.append(1.0)
+                        secondary_indices[(primary_name, sec_name)] = idx
+                        logger.info(f"    Created secondary node: {sec_name} (idx={idx})")
+            else:
+                # Primary has no secondaries - create direct expense node (x=1.0)
+                primary_amount = primary_data.get('total', 0)
+                if primary_amount > 0:
+                    idx = len(node_labels)
+                    node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
+                    node_colors.append("#e74c3c")  # Red for expenses
+                    node_x_positions.append(1.0)
+                    primary_indices[primary_name] = idx  # Direct link from Total Revenue
+                    logger.info(f"  Created direct expense node: {primary_name} (idx={idx})")
+    else:
+        # Fallback to flat structure
+        logger.info("Using flat expense structure (no hierarchy available)")
+        expense_items = list(expense_categories.items())
+        expense_items = sorted(expense_items, key=lambda x: x[1], reverse=True)
+        
+        for expense, amount in expense_items:
+            idx = len(node_labels)
+            node_labels.append(f"{expense}<br>${amount:,.0f}")
+            node_colors.append("#e74c3c")  # Red for expenses
+            node_x_positions.append(1.0)
+            primary_indices[expense] = idx  # Use same dict for flat structure
     
     # Net Income is now displayed as text below Total Revenue, not as a separate node
     
@@ -175,18 +230,54 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             return min_log_value + (log_factor * threshold * 0.15)  # Reduced from 0.3 to 0.15
     
     # Links from income sources to total revenue
-    total_revenue_idx = len(income_sources)
     for i, (source, amount) in enumerate(income_sources.items()):
         source_indices.append(i)
         target_indices.append(total_revenue_idx)
         values.append(scale_value(amount))
     
-    # Links from total revenue to expense categories
-    expense_start_idx = total_revenue_idx + 1
-    for i, (expense, amount) in enumerate(expense_items):
-        source_indices.append(total_revenue_idx)
-        target_indices.append(expense_start_idx + i)
-        values.append(scale_value(amount))
+    # Links for hierarchical expense structure
+    if expense_hierarchy:
+        for primary_name, primary_data in expense_hierarchy.items():
+            secondaries = primary_data.get('secondary', {})
+            primary_amount = primary_data.get('total', 0)
+            
+            if primary_amount > 0:
+                if secondaries:
+                    # Primary has secondaries - link Total Revenue → Primary
+                    if primary_name in primary_indices:
+                        primary_idx = primary_indices[primary_name]
+                        source_indices.append(total_revenue_idx)
+                        target_indices.append(primary_idx)
+                        values.append(scale_value(primary_amount))
+                        logger.info(f"  Link: Total Revenue → {primary_name} (${primary_amount:,.0f})")
+                        
+                        # Then link Primary → each Secondary
+                        for sec_name, sec_data in secondaries.items():
+                            sec_amount = sec_data.get('total', 0)
+                            if sec_amount > 0 and (primary_name, sec_name) in secondary_indices:
+                                sec_idx = secondary_indices[(primary_name, sec_name)]
+                                source_indices.append(primary_idx)
+                                target_indices.append(sec_idx)
+                                values.append(scale_value(sec_amount))
+                                logger.info(f"    Link: {primary_name} → {sec_name} (${sec_amount:,.0f})")
+                else:
+                    # Primary has no secondaries - link directly from Total Revenue
+                    if primary_name in primary_indices:
+                        primary_idx = primary_indices[primary_name]
+                        source_indices.append(total_revenue_idx)
+                        target_indices.append(primary_idx)
+                        values.append(scale_value(primary_amount))
+                        logger.info(f"  Link: Total Revenue → {primary_name} (direct, ${primary_amount:,.0f})")
+    else:
+        # Fallback to flat structure
+        expense_items = list(expense_categories.items())
+        expense_items = sorted(expense_items, key=lambda x: x[1], reverse=True)
+        for expense, amount in expense_items:
+            if expense in primary_indices:
+                expense_idx = primary_indices[expense]
+                source_indices.append(total_revenue_idx)
+                target_indices.append(expense_idx)
+                values.append(scale_value(amount))
     
     # No link to Net Income - it's displayed as text below Total Revenue
     
@@ -202,7 +293,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             line = dict(color = "black", width = 1),
             label = node_labels,
             color = node_colors,
-            x = [0.15, 0.5, 0.85],  # More centered positioning for responsive layout
+            x = node_x_positions if node_x_positions else [0.15, 0.5, 0.85],  # Use hierarchical positions if available
             y = None  # Auto-arrange vertically
         ),
         link = dict(
@@ -222,10 +313,10 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     
     title_text = f"Financial Flow Analysis - {income_source_label} ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Net Income: ${adjusted_gross_income:,.0f}</sub>"
     
-    # Calculate dynamic height based on number of categories (Option C: all categories shown)
-    num_categories = len(income_sources) + len(expense_items) + 1  # +1 for total revenue node
-    # Dynamic height: min 500px, max 1000px, 30px per category (more compact)
-    dynamic_height = max(500, min(1000, 200 + (num_categories * 30)))
+    # Calculate dynamic height based on number of nodes (use node_labels length)
+    num_nodes = len(node_labels)
+    # Dynamic height: min 500px, max 1500px, 30px per node (more compact)
+    dynamic_height = max(500, min(1500, 200 + (num_nodes * 30)))
     
     fig.update_layout(
         title_text=title_text,
