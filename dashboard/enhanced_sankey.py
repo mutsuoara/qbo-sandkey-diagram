@@ -302,11 +302,15 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     
     # Create custom hover templates for nodes with tertiary data
     # Nodes with tertiaries get custom template, others use None for default Plotly behavior
+    logger.info(f"Creating hover templates for {len(node_labels)} nodes")
+    logger.info(f"Nodes with tertiary data: {list(node_tertiary_data.keys())}")
+    
     hovertemplates = []
     for i in range(len(node_labels)):
         if i in node_tertiary_data:
             # This node has tertiary data - create custom hover template with breakdown
             tertiaries = node_tertiary_data[i]
+            logger.info(f"  Node {i} ({node_labels[i].split('<br>')[0]}): Creating hover template with {len(tertiaries)} tertiaries")
             
             # Format tertiary breakdown (show top 10, then summarize if more)
             max_items = 10
@@ -323,10 +327,19 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             # Create custom hovertemplate with tertiary breakdown
             # %{label} shows the node label, then we add the breakdown
             breakdown_html = "<br><br><b>Breakdown:</b><br>" + "<br>".join(tertiary_lines)
-            hovertemplates.append(f"%{{label}}{breakdown_html}<extra></extra>")
+            template = f"%{{label}}{breakdown_html}<extra></extra>"
+            hovertemplates.append(template)
+            
+            # Debug: log first few lines of template
+            logger.info(f"    Template preview (first 100 chars): {template[:100]}...")
+            logger.info(f"    First 3 tertiary items: {tertiaries[:3]}")
         else:
             # No tertiary data - use None for default Plotly hover behavior
             hovertemplates.append(None)
+    
+    # Log summary
+    custom_count = sum(1 for h in hovertemplates if h is not None)
+    logger.info(f"Hover templates created: {custom_count} custom, {len(hovertemplates) - custom_count} default")
     
     # Create the enhanced Sankey diagram
     fig = go.Figure(data=[go.Sankey(
