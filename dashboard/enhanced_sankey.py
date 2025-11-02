@@ -134,6 +134,9 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     node_colors = []
     node_x_positions = []  # X positions for hierarchical layout
     
+    # Store tertiary data for hover tooltips (map node index to tertiary data)
+    node_tertiary_data = {}  # Map node index -> list of (tertiary_name, tertiary_amount) tuples
+    
     # Income sources (left column, x=0)
     income_indices = {}
     for i, (source, amount) in enumerate(income_sources.items()):
@@ -185,10 +188,13 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                         node_colors.append("#e74c3c")  # Red for secondary expenses
                         node_x_positions.append(1.0)
                         
-                        # Log if tertiaries exist (stored but not displayed)
+                        # Store tertiary data for this node if it exists
                         tertiaries = sec_data.get('tertiary', {})
                         if tertiaries:
-                            logger.info(f"    Created secondary node with {len(tertiaries)} tertiaries (stored in data but not displayed): {sec_name} (idx={idx})")
+                            # Store tertiary data as list of tuples for hover tooltip
+                            tertiary_list = sorted(tertiaries.items(), key=lambda x: x[1], reverse=True)
+                            node_tertiary_data[idx] = tertiary_list
+                            logger.info(f"    Created secondary node with {len(tertiaries)} tertiaries (for hover tooltip): {sec_name} (idx={idx})")
                         else:
                             logger.info(f"    Created secondary node: {sec_name} (idx={idx})")
                         
@@ -294,9 +300,33 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # To make Total Revenue appear larger, we increase global thickness
     # The center node (Total Revenue) will benefit from this since it has the most connections
     
-    # Note: Tertiary categories are stored in expense_hierarchy structure but NOT displayed as nodes
-    # The expense_hierarchy dict contains: {primary: {secondary: {tertiary: amount}}}
-    # Future: Implement hover tooltips to show tertiary breakdown when hovering over secondary nodes
+    # Create custom hover templates for nodes with tertiary data
+    # Nodes with tertiaries get custom template, others use None for default Plotly behavior
+    hovertemplates = []
+    for i in range(len(node_labels)):
+        if i in node_tertiary_data:
+            # This node has tertiary data - create custom hover template with breakdown
+            tertiaries = node_tertiary_data[i]
+            
+            # Format tertiary breakdown (show top 10, then summarize if more)
+            max_items = 10
+            tertiary_lines = []
+            for tert_name, tert_amount in tertiaries[:max_items]:
+                tertiary_lines.append(f"• {tert_name}: ${tert_amount:,.0f}")
+            
+            # If more than 10, add summary
+            if len(tertiaries) > max_items:
+                remaining_count = len(tertiaries) - max_items
+                remaining_total = sum(amount for _, amount in tertiaries[max_items:])
+                tertiary_lines.append(f"...and {remaining_count} more item{'s' if remaining_count > 1 else ''}: ${remaining_total:,.0f}")
+            
+            # Create custom hovertemplate with tertiary breakdown
+            # %{label} shows the node label, then we add the breakdown
+            breakdown_html = "<br><br><b>Breakdown:</b><br>" + "<br>".join(tertiary_lines)
+            hovertemplates.append(f"%{{label}}{breakdown_html}<extra></extra>")
+        else:
+            # No tertiary data - use None for default Plotly hover behavior
+            hovertemplates.append(None)
     
     # Create the enhanced Sankey diagram
     fig = go.Figure(data=[go.Sankey(
@@ -307,7 +337,8 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             label = node_labels,
             color = node_colors,
             x = node_x_positions if node_x_positions else [0.15, 0.5, 0.85],  # Use hierarchical positions if available
-            y = None  # Auto-arrange vertically
+            y = None,  # Auto-arrange vertically
+            hovertemplate = hovertemplates  # Custom templates for nodes with tertiaries, None for default behavior
         ),
         link = dict(
             source = source_indices,
