@@ -300,17 +300,20 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # To make Total Revenue appear larger, we increase global thickness
     # The center node (Total Revenue) will benefit from this since it has the most connections
     
-    # Create custom hover templates for nodes with tertiary data
-    # Nodes with tertiaries get custom template, others use None for default Plotly behavior
-    logger.info(f"Creating hover templates for {len(node_labels)} nodes")
+    # Create custom hover content using customdata for nodes with tertiary data
+    # Plotly Sankey supports customdata which can be referenced in hovertemplate
+    # Nodes with tertiaries get customdata with breakdown HTML, others get None
+    logger.info(f"Creating hover data for {len(node_labels)} nodes")
     logger.info(f"Nodes with tertiary data: {list(node_tertiary_data.keys())}")
     
-    hovertemplates = []
+    node_customdata = []  # Custom data array for hover tooltips
+    hovertemplate = None  # Single template that checks for customdata
+    
     for i in range(len(node_labels)):
         if i in node_tertiary_data:
-            # This node has tertiary data - create custom hover template with breakdown
+            # This node has tertiary data - create custom data with breakdown
             tertiaries = node_tertiary_data[i]
-            logger.info(f"  Node {i} ({node_labels[i].split('<br>')[0]}): Creating hover template with {len(tertiaries)} tertiaries")
+            logger.info(f"  Node {i} ({node_labels[i].split('<br>')[0]}): Creating custom hover data with {len(tertiaries)} tertiaries")
             
             # Format tertiary breakdown (show top 10, then summarize if more)
             max_items = 10
@@ -324,22 +327,27 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                 remaining_total = sum(amount for _, amount in tertiaries[max_items:])
                 tertiary_lines.append(f"...and {remaining_count} more item{'s' if remaining_count > 1 else ''}: ${remaining_total:,.0f}")
             
-            # Create custom hovertemplate with tertiary breakdown
-            # %{label} shows the node label, then we add the breakdown
+            # Create custom data with tertiary breakdown
+            # Format: label + breakdown HTML
             breakdown_html = "<br><br><b>Breakdown:</b><br>" + "<br>".join(tertiary_lines)
-            template = f"%{{label}}{breakdown_html}<extra></extra>"
-            hovertemplates.append(template)
+            custom_text = f"{node_labels[i]}{breakdown_html}"
+            node_customdata.append(custom_text)
             
-            # Debug: log first few lines of template
-            logger.info(f"    Template preview (first 100 chars): {template[:100]}...")
+            # Debug: log first few lines
+            logger.info(f"    Custom data preview (first 100 chars): {custom_text[:100]}...")
             logger.info(f"    First 3 tertiary items: {tertiaries[:3]}")
         else:
             # No tertiary data - use None for default Plotly hover behavior
-            hovertemplates.append(None)
+            node_customdata.append(None)
+    
+    # Create single hovertemplate that checks if customdata exists
+    # If customdata exists, use it; otherwise use default label
+    hovertemplate = "%{customdata|%{label}}<extra></extra>"
     
     # Log summary
-    custom_count = sum(1 for h in hovertemplates if h is not None)
-    logger.info(f"Hover templates created: {custom_count} custom, {len(hovertemplates) - custom_count} default")
+    custom_count = sum(1 for cd in node_customdata if cd is not None)
+    logger.info(f"Custom hover data created: {custom_count} custom, {len(node_customdata) - custom_count} default")
+    logger.info(f"Using hovertemplate: {hovertemplate}")
     
     # Create the enhanced Sankey diagram
     fig = go.Figure(data=[go.Sankey(
@@ -351,7 +359,8 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             color = node_colors,
             x = node_x_positions if node_x_positions else [0.15, 0.5, 0.85],  # Use hierarchical positions if available
             y = None,  # Auto-arrange vertically
-            hovertemplate = hovertemplates  # Custom templates for nodes with tertiaries, None for default behavior
+            customdata = node_customdata,  # Custom data for hover tooltips (None for nodes without tertiaries)
+            hovertemplate = hovertemplate  # Single template that uses customdata if available, otherwise label
         ),
         link = dict(
             source = source_indices,
