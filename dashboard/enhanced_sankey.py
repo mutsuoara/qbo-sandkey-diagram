@@ -469,7 +469,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                 showarrow=False,
                 xref="paper",  # Use paper coordinates (0-1)
                 yref="paper",  # Use paper coordinates (0-1)
-                xanchor="right",  # Anchor text to right side
+                xanchor="center",  # Center text on the blue line
                 yanchor="middle",
                 font=dict(size=9, color="#3498db"),  # Blue color to match Total Revenue node
                 bgcolor="rgba(255, 255, 255, 0.8)",  # Semi-transparent white background
