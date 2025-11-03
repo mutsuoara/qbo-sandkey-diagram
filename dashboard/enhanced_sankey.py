@@ -422,6 +422,66 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         hovermode='closest'
     )
     
+    # Add dollar scale to the Total Revenue (blue) node
+    # Calculate 10 intervals from $0 (top) to total_revenue (bottom)
+    scale_intervals = 10
+    scale_annotations = []
+    
+    # Position scale to the left of the center area (where Total Revenue node is)
+    # Use a fixed position that will be visible regardless of Sankey internal layout
+    scale_x_position = 0.05  # Position scale on the left side of the diagram
+    
+    # Account for margins: title takes up top margin, adjust Y positions accordingly
+    # Plotly paper coordinates: 0 = bottom, 1 = top
+    # But we want to account for title area at top
+    title_margin_ratio = 0.12  # Approximate space taken by title (adjust if needed)
+    bottom_margin_ratio = 0.08  # Approximate space at bottom
+    
+    # Calculate available vertical space
+    available_height = 1.0 - title_margin_ratio - bottom_margin_ratio
+    
+    for i in range(scale_intervals + 1):  # +1 to include both $0 and max
+        # Calculate dollar amount for this interval (from top to bottom)
+        # Top is $0, bottom is total_revenue
+        dollar_amount = (total_revenue / scale_intervals) * i
+        
+        # Calculate Y position within available space
+        # We want $0 at top, total_revenue at bottom
+        # In Plotly: y=1 is top, y=0 is bottom
+        relative_y = i / scale_intervals  # 0 = top ($0), 1 = bottom (max)
+        # Map to available space: invert and add bottom margin offset
+        y_position = 1.0 - title_margin_ratio - (relative_y * available_height)
+        
+        # Format dollar amount - use compact format for readability
+        if dollar_amount >= 1000000:
+            formatted_amount = f"${dollar_amount/1000000:.1f}M"
+        elif dollar_amount >= 1000:
+            formatted_amount = f"${dollar_amount/1000:.0f}K"
+        else:
+            formatted_amount = f"${dollar_amount:,.0f}"
+        
+        # Add annotation
+        scale_annotations.append(
+            dict(
+                x=scale_x_position,
+                y=y_position,
+                text=formatted_amount,
+                showarrow=False,
+                xref="paper",  # Use paper coordinates (0-1)
+                yref="paper",  # Use paper coordinates (0-1)
+                xanchor="right",  # Anchor text to right side
+                yanchor="middle",
+                font=dict(size=9, color="#3498db"),  # Blue color to match Total Revenue node
+                bgcolor="rgba(255, 255, 255, 0.8)",  # Semi-transparent white background
+                bordercolor="#3498db",
+                borderwidth=1,
+                borderpad=3
+            )
+        )
+    
+    # Add all scale annotations to the figure
+    fig.update_layout(annotations=scale_annotations)
+    
     return fig
 
 def create_sample_sankey_diagram(start_date=None, end_date=None):
