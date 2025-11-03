@@ -227,18 +227,20 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     
     # Net Income is now displayed as text below Total Revenue, not as a separate node
     
-    # Create links with logarithmic scaling for thickness
-    # Values < $20,000 will appear as thin lines, larger values scale logarithmically
+    # Create links - use actual dollar amounts for proper node height alignment
+    # Plotly Sankey uses link values to calculate node heights, so we need actual amounts
     source_indices = []
     target_indices = []
     values = []
     
-    # Threshold: values below $20k will appear as thin lines (use minimum value)
+    # Threshold: values below $20k will appear as thin lines (for visual scaling)
     threshold = 20000
     min_log_value = 100  # Minimum for thin lines
     
     def scale_value(val):
-        """Scale value logarithmically: values < $20k become thin lines"""
+        """Scale value logarithmically: values < $20k become thin lines
+        NOTE: This is for visual link thickness only. Actual dollar amounts must be used
+        in the 'values' array for Plotly to calculate correct node heights."""
         if val < threshold:
             return min_log_value  # Thin line for values < $20k
         else:
@@ -248,10 +250,11 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             return min_log_value + (log_factor * threshold * 0.15)  # Reduced from 0.3 to 0.15
     
     # Links from income sources to total revenue
+    # Use actual amounts so node heights match properly
     for i, (source, amount) in enumerate(income_sources.items()):
         source_indices.append(i)
         target_indices.append(total_revenue_idx)
-        values.append(scale_value(amount))
+        values.append(amount)  # Use actual amount, not scaled
     
     # Links for hierarchical expense structure
     if expense_hierarchy:
@@ -262,21 +265,23 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             if primary_amount > 0:
                 if secondaries:
                     # Primary has secondaries - link Total Revenue → Primary
+                    # Use actual primary_amount so link height matches node height
                     if primary_name in primary_indices:
                         primary_idx = primary_indices[primary_name]
                         source_indices.append(total_revenue_idx)
                         target_indices.append(primary_idx)
-                        values.append(scale_value(primary_amount))
+                        values.append(primary_amount)  # Use actual amount for proper alignment
                         logger.info(f"  Link: Total Revenue → {primary_name} (${primary_amount:,.0f})")
                         
                         # Then link Primary → each Secondary
+                        # Use actual amounts so secondary node heights match
                         for sec_name, sec_data in secondaries.items():
                             sec_amount = sec_data.get('total', 0)
                             if sec_amount > 0 and (primary_name, sec_name) in secondary_indices:
                                 sec_idx = secondary_indices[(primary_name, sec_name)]
                                 source_indices.append(primary_idx)
                                 target_indices.append(sec_idx)
-                                values.append(scale_value(sec_amount))
+                                values.append(sec_amount)  # Use actual amount, not scaled
                                 logger.info(f"    Link: {primary_name} → {sec_name} (${sec_amount:,.0f})")
                 else:
                     # Primary has no secondaries - link directly from Total Revenue
@@ -284,7 +289,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                         primary_idx = primary_indices[primary_name]
                         source_indices.append(total_revenue_idx)
                         target_indices.append(primary_idx)
-                        values.append(scale_value(primary_amount))
+                        values.append(primary_amount)  # Use actual amount for proper alignment
                         logger.info(f"  Link: Total Revenue → {primary_name} (direct, ${primary_amount:,.0f})")
     else:
         # Fallback to flat structure
@@ -295,7 +300,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                 expense_idx = primary_indices[expense]
                 source_indices.append(total_revenue_idx)
                 target_indices.append(expense_idx)
-                values.append(scale_value(amount))
+                values.append(amount)  # Use actual amount for proper alignment
     
     # No link to Net Income - it's displayed as text below Total Revenue
     
