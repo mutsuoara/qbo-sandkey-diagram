@@ -185,7 +185,6 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     if sec_amount > 0:
                         idx = len(node_labels)
                         node_labels.append(f"{sec_name}<br>${sec_amount:,.0f}")
-                        node_colors.append("#e74c3c")  # Red for secondary expenses
                         node_x_positions.append(1.0)
                         
                         # Store tertiary data for this node if it exists
@@ -194,9 +193,13 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                             # Store tertiary data as list of tuples for hover tooltip
                             tertiary_list = sorted(tertiaries.items(), key=lambda x: x[1], reverse=True)
                             node_tertiary_data[idx] = tertiary_list
-                            logger.info(f"    Created secondary node with {len(tertiaries)} tertiaries (for hover tooltip): {sec_name} (idx={idx})")
+                            # Color code: Purple/magenta for nodes with tertiary breakdown
+                            node_colors.append("#9b59b6")  # Purple for secondary expenses with tertiaries
+                            logger.info(f"    Created secondary node with {len(tertiaries)} tertiaries (purple color): {sec_name} (idx={idx})")
                         else:
-                            logger.info(f"    Created secondary node: {sec_name} (idx={idx})")
+                            # Color code: Red for nodes without tertiaries
+                            node_colors.append("#e74c3c")  # Red for secondary expenses without tertiaries
+                            logger.info(f"    Created secondary node (red color): {sec_name} (idx={idx})")
                         
                         secondary_indices[(primary_name, sec_name)] = idx
             else:
