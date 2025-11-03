@@ -176,5 +176,5 @@ def create_dashboard_page():
                     ], style={'backgroundColor': 'white', 'padding': '20px', 'borderRadius': '8px', 'boxShadow': '0 2px 10px rgba(0,0,0,0.1)'})
                 ], style={'display': 'flex', 'justifyContent': 'center'})
             ])
-        ], style={'maxWidth': '95vw', 'width': '95vw', 'margin': '0 auto'})
+        ], style={'maxWidth': '99vw', 'width': '99vw', 'margin': '0 auto'})
     ])
