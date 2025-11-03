@@ -427,9 +427,9 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     scale_intervals = 10
     scale_annotations = []
     
-    # Position scale to the left of the center area (where Total Revenue node is)
-    # Use a fixed position that will be visible regardless of Sankey internal layout
-    scale_x_position = 0.05  # Position scale on the left side of the diagram
+    # Position scale over/on top of the blue Total Revenue node
+    # Total Revenue node is at x=0.33, position annotations there to overlay
+    scale_x_position = 0.33  # Position scale over the Total Revenue node (center column)
     
     # Account for margins: title takes up top margin, adjust Y positions accordingly
     # Plotly paper coordinates: 0 = bottom, 1 = top
