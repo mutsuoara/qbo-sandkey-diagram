@@ -967,6 +967,76 @@ class QBODataFetcher:
             if not expense_categories:
                 logger.warning("No expense data found")
             
+            # PHASE 2: Integrate project-level expense data for accounts 5001 and 5011
+            logger.info("="*80)
+            logger.info("PHASE 2: INTEGRATING PROJECT-LEVEL EXPENSE DATA")
+            logger.info("="*80)
+            try:
+                project_expenses = self.get_expenses_by_project(
+                    ['5001', '5011'],
+                    start_date,
+                    end_date
+                )
+                
+                if project_expenses:
+                    logger.info(f"Retrieved project expenses for {len(project_expenses)} accounts")
+                    
+                    # Find and update secondary nodes in expense_hierarchy
+                    for account_name, projects in project_expenses.items():
+                        logger.info(f"Processing {account_name}: {len(projects)} projects")
+                        
+                        # Map renamed account names to possible original names in expense_hierarchy
+                        # The hierarchical parser uses original names, but get_expenses_by_project returns renamed names
+                        possible_names = [account_name]  # Try the returned name first
+                        
+                        # Add original name variations
+                        if account_name == "Billable Salaries and Wages":
+                            possible_names.extend(["5001 Salaries & wages", "5001 Salaries and Wages", "Salaries & wages"])
+                        elif account_name == "5011 Direct 1099 Labor":
+                            possible_names.extend(["5011 Direct 1099 Labor"])  # This one might match as-is
+                        
+                        # Find this account in the expense_hierarchy
+                        # These accounts should be under "5000 COGS" primary
+                        found = False
+                        for primary_name, primary_data in expense_hierarchy.items():
+                            if 'secondary' not in primary_data:
+                                continue
+                            
+                            # Try each possible name
+                            matching_secondary_name = None
+                            for possible_name in possible_names:
+                                if possible_name in primary_data['secondary']:
+                                    matching_secondary_name = possible_name
+                                    break
+                            
+                            if matching_secondary_name:
+                                # Add projects data to this secondary node
+                                secondary_data = primary_data['secondary'][matching_secondary_name]
+                                secondary_data['projects'] = projects
+                                logger.info(f"  ✅ Added project breakdown to {matching_secondary_name} under {primary_name}")
+                                logger.info(f"     Projects: {list(projects.keys())}")
+                                logger.info(f"     Total: ${sum(projects.values()):,.2f}")
+                                found = True
+                                break
+                        
+                        if not found:
+                            logger.warning(f"  ⚠️ Could not find {account_name} in expense_hierarchy")
+                            all_secondaries = [sec for prim in expense_hierarchy.values() for sec in prim.get('secondary', {}).keys()]
+                            logger.warning(f"     Available secondaries: {all_secondaries}")
+                            logger.warning(f"     Tried names: {possible_names}")
+                else:
+                    logger.warning("No project expenses retrieved")
+                    
+            except Exception as e:
+                logger.error(f"Error integrating project-level expense data: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+                # Continue even if project expense integration fails
+            
+            logger.info("="*80)
+            logger.info("PHASE 2 COMPLETE")
+            logger.info("="*80)
+            
             # Calculate totals
             total_revenue = sum(project_income.values())
             total_expenses = sum(expense_categories.values())
