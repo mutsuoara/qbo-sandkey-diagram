@@ -724,16 +724,29 @@ class QBODataFetcher:
                         if account_match:
                             account_num = account_match.group(1)
                     
-                    # Check if this section looks like a customer/project name (not an account number)
-                    # Customer/project names typically don't start with 4 digits
+                    # Check if this section looks like a customer/project name (not an account number or expense category)
+                    # Customer/project names typically don't start with 4 digits and aren't common expense category names
                     current_customer_name = parent_customer_name
                     if section_name and not account_num and depth <= 2:
-                        # This might be a customer/project section (e.g., "A6 Enterprise Services")
-                        # Check if it looks like a project name (contains "A6", "TWS", etc. or doesn't start with digits)
+                        # Common expense category names to exclude (not customer/project names)
+                        expense_category_keywords = [
+                            'cost of goods sold', 'cogs', 'expenses', 'income', 'revenue',
+                            'ordinary income', 'ordinary expenses', 'other income', 'other expenses',
+                            'gross profit', 'net income', 'operating income'
+                        ]
+                        
+                        # Check if it looks like a project name (contains project indicators)
+                        # Only treat as customer/project if it contains project indicators, not just because it doesn't start with digits
                         project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
-                        if any(indicator in section_name.lower() for indicator in project_indicators) or not re.match(r'^\d', section_name):
+                        is_expense_category = any(keyword in section_name.lower() for keyword in expense_category_keywords)
+                        has_project_indicator = any(indicator in section_name.lower() for indicator in project_indicators)
+                        
+                        # Only treat as customer/project if it has project indicators and is NOT an expense category
+                        if has_project_indicator and not is_expense_category:
                             current_customer_name = section_name
                             logger.info(f"  Found customer/project section at depth {depth}: {current_customer_name}")
+                        elif is_expense_category:
+                            logger.debug(f"  Skipping expense category section: {section_name}")
                     
                     # Update account name if we found an account section
                     current_account_name = parent_account_name
@@ -773,20 +786,38 @@ class QBODataFetcher:
                                     # But we want the actual project name (like "A6 Enterprise Services") from parent sections
                                     project_name = current_customer_name
                                     
+                                    # Validate that we have a valid project name (not an expense category)
+                                    if project_name:
+                                        expense_category_keywords = [
+                                            'cost of goods sold', 'cogs', 'expenses', 'income', 'revenue',
+                                            'ordinary income', 'ordinary expenses', 'other income', 'other expenses',
+                                            'gross profit', 'net income', 'operating income'
+                                        ]
+                                        if any(keyword in project_name.lower() for keyword in expense_category_keywords):
+                                            logger.warning(f"  ⚠️ Invalid project name detected (expense category): {project_name}, skipping")
+                                            project_name = None
+                                    
                                     if not project_name:
                                         # Fallback: try to extract from ColData if no parent customer found
+                                        # But this will likely be a class/department code, not a project name
                                         if len(col_data) >= 5:
                                             customer_name = col_data[4].get('value', '').strip() if len(col_data) > 4 else ''
                                             if not customer_name and len(col_data) > 3:
                                                 customer_name = col_data[3].get('value', '').strip()
-                                            project_name = customer_name
+                                            
+                                            # Only use if it looks like a project name (has project indicators)
+                                            project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
+                                            if customer_name and any(indicator in customer_name.lower() for indicator in project_indicators):
+                                                project_name = customer_name
+                                            else:
+                                                logger.debug(f"  ⚠️ ColData value '{customer_name}' doesn't look like a project name, skipping")
                                         
                                         # Normalize project name (remove parent customer prefix if present)
-                                        if ':' in project_name:
+                                        if project_name and ':' in project_name:
                                             project_name = project_name.split(':')[-1].strip()
                                     
                                     if not project_name:
-                                        logger.warning(f"  ⚠️ No project name found for transaction, skipping")
+                                        logger.warning(f"  ⚠️ No valid project name found for transaction, skipping")
                                         continue
                                     
                                     # Map account number to account name (handle renamed accounts)
