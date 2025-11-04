@@ -683,175 +683,112 @@ class QBODataFetcher:
                     if 'ColData' in rows[0]:
                         logger.info(f"First row ColData: {rows[0]['ColData']}")
             
-            # Process each row
-            row_count = 0
-            for row in rows:
-                row_count += 1
-                if not isinstance(row, dict):
-                    logger.debug(f"Row {row_count}: Not a dict, skipping")
-                    continue
+            # Recursively process nested structure to find target accounts
+            def process_nested_rows(rows_to_process, depth=0, parent_account_name=None):
+                """
+                Recursively navigate through nested Rows structure to find target accounts
+                and extract transaction-level customer/project data
+                """
+                if not rows_to_process:
+                    return
                 
-                # Extract account name and amount from row
-                # The structure depends on how QuickBooks returns the detail report
-                # We need to check both Header and ColData structures
-                account_name = None
-                customer_name = None
-                amount = 0.0
-                
-                # Log row type for first few rows
-                if row_count <= 5:
-                    logger.debug(f"Row {row_count} keys: {list(row.keys())}")
-                    logger.debug(f"Row {row_count} type: {row.get('type', 'unknown')}")
-                
-                # Try Header structure first (for Section rows)
-                if 'Header' in row:
-                    col_data = row['Header'].get('ColData', [])
-                    if len(col_data) >= 2:
-                        account_name = col_data[0].get('value', '').strip()
-                        # Customer might be in a different column or nested
-                        # Check if there are more columns for customer
-                        if len(col_data) >= 3:
-                            customer_name = col_data[1].get('value', '').strip()  # Customer might be in column 1
-                            amount_str = col_data[2].get('value', '0').replace(',', '').replace('$', '')
-                        else:
-                            amount_str = col_data[1].get('value', '0').replace(',', '').replace('$', '')
-                        
-                        try:
-                            amount = float(amount_str) if amount_str else 0.0
-                        except ValueError:
-                            amount = 0.0
-                
-                # Try ColData structure (for Data rows)
-                elif 'ColData' in row:
-                    col_data = row['ColData']
-                    if len(col_data) >= 2:
-                        account_name = col_data[0].get('value', '').strip()
-                        # In P&L Detail by Customer, customer might be in column 1, account in column 0
-                        # Or it might be nested differently - need to check actual structure
-                        if len(col_data) >= 3:
-                            customer_name = col_data[1].get('value', '').strip()
-                            amount_str = col_data[2].get('value', '0').replace(',', '').replace('$', '')
-                        else:
-                            amount_str = col_data[1].get('value', '0').replace(',', '').replace('$', '')
-                        
-                        try:
-                            amount = float(amount_str) if amount_str else 0.0
-                        except ValueError:
-                            amount = 0.0
-                
-                # Skip if no account name or amount is zero
-                if not account_name or amount == 0:
-                    continue
-                
-                # Extract account number from account name
-                account_match = re.match(r'^(\d{4})', account_name)
-                if not account_match:
-                    if row_count <= 10:  # Log first 10 non-matching accounts
-                        logger.debug(f"Row {row_count}: No account number found in '{account_name}'")
-                    continue
-                
-                account_num = account_match.group(1)
-                
-                # Check if this account is in our target list
-                if account_num not in account_numbers:
-                    if row_count <= 10:  # Log first 10 non-target accounts
-                        logger.debug(f"Row {row_count}: Account {account_num} not in target list {account_numbers}")
-                    continue
-                
-                logger.info(f"Row {row_count}: Found target account {account_num} ({account_name})")
-                
-                # Skip summary rows
-                skip_keywords = ['total', 'subtotal', 'net income', 'gross profit']
-                if any(keyword in account_name.lower() for keyword in skip_keywords):
-                    continue
-                
-                # Handle customer/project name
-                # If no customer name extracted, try to get it from nested structure
-                if not customer_name:
-                    # Check if there's a nested row structure with customer info
-                    if 'Rows' in row:
-                        # This might be a section with customer breakdown
-                        nested_rows = row.get('Rows', {})
-                        if isinstance(nested_rows, dict) and 'Row' in nested_rows:
-                            nested_rows_list = nested_rows['Row']
-                        elif isinstance(nested_rows, list):
-                            nested_rows_list = nested_rows
-                        else:
-                            nested_rows_list = []
-                        
-                        # Process nested rows for customer breakdown
-                        for nested_row in nested_rows_list:
-                            if not isinstance(nested_row, dict):
-                                continue
-                            
-                            # Extract customer name from nested row
-                            nested_col_data = nested_row.get('ColData', [])
-                            if len(nested_col_data) >= 2:
-                                nested_customer = nested_col_data[0].get('value', '').strip()
-                                nested_amount_str = nested_col_data[1].get('value', '0').replace(',', '').replace('$', '')
-                                
-                                try:
-                                    nested_amount = float(nested_amount_str) if nested_amount_str else 0.0
-                                except ValueError:
-                                    nested_amount = 0.0
-                                
-                                if nested_customer and nested_amount != 0:
-                                    # Use account name from parent, customer from nested row
-                                    # Map account number to account name (handle renamed accounts)
-                                    account_full_name = account_name
-                                    
-                                    # Handle renamed accounts (5001 -> Billable Salaries and Wages)
-                                    if account_num == '5001' and 'salaries' in account_name.lower():
-                                        account_full_name = "Billable Salaries and Wages"
-                                    elif account_num == '5011':
-                                        account_full_name = account_name  # Keep original name for 5011
-                                    
-                                    # Normalize project name (remove parent customer prefix if present)
-                                    project_name = nested_customer
-                                    if ':' in project_name:
-                                        # Handle "Parent Customer: Project" format
-                                        project_name = project_name.split(':')[-1].strip()
-                                    
-                                    # Add to result
-                                    if account_full_name not in expense_by_project:
-                                        expense_by_project[account_full_name] = {}
-                                    
-                                    if project_name not in expense_by_project[account_full_name]:
-                                        expense_by_project[account_full_name][project_name] = 0.0
-                                    
-                                    expense_by_project[account_full_name][project_name] += abs(nested_amount)  # Expenses are negative in P&L
-                                    
-                                    logger.info(f"  📊 {account_full_name} → {project_name}: ${abs(nested_amount):,.2f}")
-                        
-                        continue  # Skip parent row, we processed nested rows
-                    else:
-                        # No customer assigned, skip this row
-                        continue
+                # Extract rows list from various structures
+                if isinstance(rows_to_process, dict) and 'Row' in rows_to_process:
+                    rows_list = rows_to_process['Row']
+                elif isinstance(rows_to_process, list):
+                    rows_list = rows_to_process
                 else:
-                    # Normalize project name (remove parent customer prefix if present)
-                    project_name = customer_name
-                    if ':' in project_name:
-                        # Handle "Parent Customer: Project" format
-                        project_name = project_name.split(':')[-1].strip()
+                    return
+                
+                for row in rows_list:
+                    if not isinstance(row, dict):
+                        continue
                     
-                    # Map account number to account name (handle renamed accounts)
-                    account_full_name = account_name
-                    if account_num == '5001' and 'salaries' in account_name.lower():
-                        account_full_name = "Billable Salaries and Wages"
-                    elif account_num == '5011':
-                        account_full_name = account_name  # Keep original name for 5011
+                    # Get account name from Header if present
+                    account_name = None
+                    if 'Header' in row:
+                        header_col_data = row['Header'].get('ColData', [])
+                        if header_col_data:
+                            account_name = header_col_data[0].get('value', '').strip()
                     
-                    # Add to result
-                    if account_full_name not in expense_by_project:
-                        expense_by_project[account_full_name] = {}
+                    # Extract account number if present
+                    account_num = None
+                    if account_name:
+                        account_match = re.match(r'^(\d{4})', account_name)
+                        if account_match:
+                            account_num = account_match.group(1)
                     
-                    if project_name not in expense_by_project[account_full_name]:
-                        expense_by_project[account_full_name][project_name] = 0.0
+                    # Check if this is a target account section (5001 or 5011)
+                    if account_num and account_num in account_numbers:
+                        logger.info(f"Found target account section: {account_num} ({account_name}) at depth {depth}")
+                        
+                        # This is a target account - process its nested transaction rows
+                        if 'Rows' in row:
+                            transaction_rows = self._extract_rows(row['Rows'])
+                            
+                            for transaction_row in transaction_rows:
+                                if not isinstance(transaction_row, dict):
+                                    continue
+                                
+                                # Transaction rows have ColData with customer/project info
+                                if 'ColData' in transaction_row:
+                                    col_data = transaction_row.get('ColData', [])
+                                    
+                                    # Based on debug output:
+                                    # ColData[4] = customer/project name (e.g., "02 Client Services")
+                                    # ColData[7] = amount (e.g., "103.21")
+                                    
+                                    if len(col_data) >= 8:
+                                        # Try index 4 first (common case)
+                                        customer_name = col_data[4].get('value', '').strip() if len(col_data) > 4 else ''
+                                        
+                                        # If index 4 is empty, try index 3 (for some accounts like 5011)
+                                        if not customer_name and len(col_data) > 3:
+                                            customer_name = col_data[3].get('value', '').strip()
+                                        
+                                        # Get amount from index 7
+                                        amount_str = col_data[7].get('value', '0').replace(',', '').replace('$', '').strip()
+                                        
+                                        try:
+                                            amount = float(amount_str) if amount_str else 0.0
+                                        except ValueError:
+                                            amount = 0.0
+                                        
+                                        # Skip if no customer or zero amount
+                                        if not customer_name or amount == 0:
+                                            continue
+                                        
+                                        # Map account number to account name (handle renamed accounts)
+                                        account_full_name = account_name
+                                        if account_num == '5001' and 'salaries' in account_name.lower():
+                                            account_full_name = "Billable Salaries and Wages"
+                                        elif account_num == '5011':
+                                            account_full_name = account_name  # Keep original name for 5011
+                                        
+                                        # Normalize project name (remove parent customer prefix if present)
+                                        project_name = customer_name
+                                        if ':' in project_name:
+                                            # Handle "Parent Customer: Project" format
+                                            project_name = project_name.split(':')[-1].strip()
+                                        
+                                        # Add to result
+                                        if account_full_name not in expense_by_project:
+                                            expense_by_project[account_full_name] = {}
+                                        
+                                        if project_name not in expense_by_project[account_full_name]:
+                                            expense_by_project[account_full_name][project_name] = 0.0
+                                        
+                                        # Use absolute value (expenses are negative in P&L)
+                                        expense_by_project[account_full_name][project_name] += abs(amount)
+                                        
+                                        logger.info(f"  📊 {account_full_name} → {project_name}: ${abs(amount):,.2f}")
                     
-                    # Handle negative amounts (expenses are typically negative in P&L reports)
-                    expense_by_project[account_full_name][project_name] += abs(amount)
-                    
-                    logger.info(f"  📊 {account_full_name} → {project_name}: ${abs(amount):,.2f}")
+                    # Recursively process nested rows (continue searching deeper)
+                    if 'Rows' in row:
+                        process_nested_rows(row['Rows'], depth + 1, account_name or parent_account_name)
+            
+            # Start recursive processing from top-level rows
+            process_nested_rows(rows)
             
             # Log summary
             logger.info("="*80)
