@@ -684,10 +684,16 @@ class QBODataFetcher:
                         logger.info(f"First row ColData: {rows[0]['ColData']}")
             
             # Recursively process nested structure to find target accounts
-            def process_nested_rows(rows_to_process, depth=0, parent_account_name=None):
+            def process_nested_rows(rows_to_process, depth=0, parent_account_name=None, parent_customer_name=None):
                 """
                 Recursively navigate through nested Rows structure to find target accounts
                 and extract transaction-level customer/project data
+                
+                Args:
+                    rows_to_process: Rows to process
+                    depth: Current nesting depth (0 = top level)
+                    parent_account_name: Account name from parent section
+                    parent_customer_name: Customer/Project name from parent section (e.g., "A6 Enterprise Services")
                 """
                 if not rows_to_process:
                     return
@@ -704,23 +710,39 @@ class QBODataFetcher:
                     if not isinstance(row, dict):
                         continue
                     
-                    # Get account name from Header if present
-                    account_name = None
+                    # Get section name from Header if present
+                    section_name = None
                     if 'Header' in row:
                         header_col_data = row['Header'].get('ColData', [])
                         if header_col_data:
-                            account_name = header_col_data[0].get('value', '').strip()
+                            section_name = header_col_data[0].get('value', '').strip()
                     
                     # Extract account number if present
                     account_num = None
-                    if account_name:
-                        account_match = re.match(r'^(\d{4})', account_name)
+                    if section_name:
+                        account_match = re.match(r'^(\d{4})', section_name)
                         if account_match:
                             account_num = account_match.group(1)
                     
+                    # Check if this section looks like a customer/project name (not an account number)
+                    # Customer/project names typically don't start with 4 digits
+                    current_customer_name = parent_customer_name
+                    if section_name and not account_num and depth <= 2:
+                        # This might be a customer/project section (e.g., "A6 Enterprise Services")
+                        # Check if it looks like a project name (contains "A6", "TWS", etc. or doesn't start with digits)
+                        project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
+                        if any(indicator in section_name.lower() for indicator in project_indicators) or not re.match(r'^\d', section_name):
+                            current_customer_name = section_name
+                            logger.info(f"  Found customer/project section at depth {depth}: {current_customer_name}")
+                    
+                    # Update account name if we found an account section
+                    current_account_name = parent_account_name
+                    if account_num:
+                        current_account_name = section_name
+                    
                     # Check if this is a target account section (5001 or 5011)
                     if account_num and account_num in account_numbers:
-                        logger.info(f"Found target account section: {account_num} ({account_name}) at depth {depth}")
+                        logger.info(f"Found target account section: {account_num} ({current_account_name}) at depth {depth}, parent customer: {current_customer_name}")
                         
                         # This is a target account - process its nested transaction rows
                         if 'Rows' in row:
@@ -734,58 +756,61 @@ class QBODataFetcher:
                                 if 'ColData' in transaction_row:
                                     col_data = transaction_row.get('ColData', [])
                                     
-                                    # Based on debug output:
-                                    # ColData[4] = customer/project name (e.g., "02 Client Services")
-                                    # ColData[7] = amount (e.g., "103.21")
+                                    # Get amount from index 7
+                                    amount_str = col_data[7].get('value', '0').replace(',', '').replace('$', '').strip() if len(col_data) > 7 else '0'
                                     
-                                    if len(col_data) >= 8:
-                                        # Try index 4 first (common case)
-                                        customer_name = col_data[4].get('value', '').strip() if len(col_data) > 4 else ''
-                                        
-                                        # If index 4 is empty, try index 3 (for some accounts like 5011)
-                                        if not customer_name and len(col_data) > 3:
-                                            customer_name = col_data[3].get('value', '').strip()
-                                        
-                                        # Get amount from index 7
-                                        amount_str = col_data[7].get('value', '0').replace(',', '').replace('$', '').strip()
-                                        
-                                        try:
-                                            amount = float(amount_str) if amount_str else 0.0
-                                        except ValueError:
-                                            amount = 0.0
-                                        
-                                        # Skip if no customer or zero amount
-                                        if not customer_name or amount == 0:
-                                            continue
-                                        
-                                        # Map account number to account name (handle renamed accounts)
-                                        account_full_name = account_name
-                                        if account_num == '5001' and 'salaries' in account_name.lower():
-                                            account_full_name = "Billable Salaries and Wages"
-                                        elif account_num == '5011':
-                                            account_full_name = account_name  # Keep original name for 5011
+                                    try:
+                                        amount = float(amount_str) if amount_str else 0.0
+                                    except ValueError:
+                                        amount = 0.0
+                                    
+                                    # Skip if zero amount
+                                    if amount == 0:
+                                        continue
+                                    
+                                    # Use parent customer name if available, otherwise try to extract from ColData
+                                    # The class/department code (like "02 Client Services") is in ColData[4] or ColData[3]
+                                    # But we want the actual project name (like "A6 Enterprise Services") from parent sections
+                                    project_name = current_customer_name
+                                    
+                                    if not project_name:
+                                        # Fallback: try to extract from ColData if no parent customer found
+                                        if len(col_data) >= 5:
+                                            customer_name = col_data[4].get('value', '').strip() if len(col_data) > 4 else ''
+                                            if not customer_name and len(col_data) > 3:
+                                                customer_name = col_data[3].get('value', '').strip()
+                                            project_name = customer_name
                                         
                                         # Normalize project name (remove parent customer prefix if present)
-                                        project_name = customer_name
                                         if ':' in project_name:
-                                            # Handle "Parent Customer: Project" format
                                             project_name = project_name.split(':')[-1].strip()
-                                        
-                                        # Add to result
-                                        if account_full_name not in expense_by_project:
-                                            expense_by_project[account_full_name] = {}
-                                        
-                                        if project_name not in expense_by_project[account_full_name]:
-                                            expense_by_project[account_full_name][project_name] = 0.0
-                                        
-                                        # Use absolute value (expenses are negative in P&L)
-                                        expense_by_project[account_full_name][project_name] += abs(amount)
-                                        
-                                        logger.info(f"  📊 {account_full_name} → {project_name}: ${abs(amount):,.2f}")
+                                    
+                                    if not project_name:
+                                        logger.warning(f"  ⚠️ No project name found for transaction, skipping")
+                                        continue
+                                    
+                                    # Map account number to account name (handle renamed accounts)
+                                    account_full_name = current_account_name
+                                    if account_num == '5001' and 'salaries' in current_account_name.lower():
+                                        account_full_name = "Billable Salaries and Wages"
+                                    elif account_num == '5011':
+                                        account_full_name = current_account_name  # Keep original name for 5011
+                                    
+                                    # Add to result
+                                    if account_full_name not in expense_by_project:
+                                        expense_by_project[account_full_name] = {}
+                                    
+                                    if project_name not in expense_by_project[account_full_name]:
+                                        expense_by_project[account_full_name][project_name] = 0.0
+                                    
+                                    # Use absolute value (expenses are negative in P&L)
+                                    expense_by_project[account_full_name][project_name] += abs(amount)
+                                    
+                                    logger.info(f"  📊 {account_full_name} → {project_name}: ${abs(amount):,.2f}")
                     
                     # Recursively process nested rows (continue searching deeper)
                     if 'Rows' in row:
-                        process_nested_rows(row['Rows'], depth + 1, account_name or parent_account_name)
+                        process_nested_rows(row['Rows'], depth + 1, current_account_name, current_customer_name)
             
             # Start recursive processing from top-level rows
             process_nested_rows(rows)
