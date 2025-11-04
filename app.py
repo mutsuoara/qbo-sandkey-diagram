@@ -1044,6 +1044,73 @@ def test_hierarchy_parser():
             "traceback": traceback.format_exc()
         })
 
+@app.server.route('/test/expenses-by-project')
+def test_expenses_by_project():
+    """Test project-level expense tracking for 5001 and 5011"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime, timedelta
+    from flask import jsonify
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        if not tokens:
+            return jsonify({"error": "No tokens found"})
+        
+        environment = credentials.get('environment', 'sandbox')
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=environment
+        )
+        
+        # Get last 90 days
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)
+        
+        # Get project expenses for 5001 and 5011
+        project_expenses = data_fetcher.get_expenses_by_project(
+            ['5001', '5011'],
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d')
+        )
+        
+        # Format for display
+        result = {
+            "success": True,
+            "date_range": {
+                "start": start_date.strftime('%Y-%m-%d'),
+                "end": end_date.strftime('%Y-%m-%d')
+            },
+            "project_expenses": project_expenses,
+            "summary": {
+                "accounts": len(project_expenses),
+                "total_projects": sum(len(projects) for projects in project_expenses.values())
+            }
+        }
+        
+        # Add detailed breakdown for each account
+        for account_name, projects in project_expenses.items():
+            if projects:
+                result["summary"][account_name] = {
+                    "project_count": len(projects),
+                    "total_amount": sum(projects.values())
+                }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error testing expenses by project: {e}")
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
+
 def exchange_code_for_token(code, credentials):
     """Exchange authorization code for access token"""
     try:
