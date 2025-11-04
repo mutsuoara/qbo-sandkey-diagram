@@ -987,22 +987,16 @@ def test_hierarchy_parser():
         end_date = datetime.now()
         start_date = end_date - timedelta(days=90)
         
-        # Get P&L report and parse with hierarchy
-        pl_data = data_fetcher.get_profit_and_loss(
+        # Use get_financial_data_for_sankey to get data with Phase 2 integration (project-level data)
+        financial_data = data_fetcher.get_financial_data_for_sankey(
             start_date.strftime('%Y-%m-%d'),
             end_date.strftime('%Y-%m-%d')
         )
         
-        if not pl_data:
-            return jsonify({"error": "Failed to fetch P&L report"})
-        
-        # Parse with hierarchy preserved
-        financial_data = data_fetcher._parse_profit_loss_report(pl_data)
-        
         if not financial_data:
-            return jsonify({"error": "Failed to parse P&L report"})
+            return jsonify({"error": "Failed to fetch financial data"})
         
-        # Get hierarchical structure
+        # Get hierarchical structure (includes Phase 2 project data)
         expense_hierarchy = financial_data.get('expense_hierarchy', {})
         
         # Format for display
@@ -1019,7 +1013,7 @@ def test_hierarchy_parser():
             "expenses": {}
         }
         
-        # Format expenses to show structure
+        # Format expenses to show structure (including projects field from Phase 2)
         for primary_name, primary_data in expense_hierarchy.items():
             result["expenses"][primary_name] = {
                 "total": primary_data.get('total', 0),
@@ -1031,7 +1025,9 @@ def test_hierarchy_parser():
                 result["expenses"][primary_name]["secondaries"][sec_name] = {
                     "total": sec_data.get('total', 0),
                     "tertiary_count": len(sec_data.get('tertiary', {})),
-                    "tertiaries": sec_data.get('tertiary', {})
+                    "tertiaries": sec_data.get('tertiary', {}),
+                    "project_count": len(sec_data.get('projects', {})),
+                    "projects": sec_data.get('projects', {})  # Include Phase 2 project data
                 }
         
         return jsonify(result)
