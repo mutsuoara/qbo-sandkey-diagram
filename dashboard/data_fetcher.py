@@ -813,15 +813,48 @@ class QBODataFetcher:
                                     if amount == 0:
                                         continue
                                     
-                                    # Use parent customer name if available, otherwise try to extract from ColData
-                                    # The class/department code (like "02 Client Services") is in ColData[4] or ColData[3]
-                                    # But we want the actual project name (like "A6 Enterprise Services") from parent sections
-                                    project_name = current_customer_name
+                                    # Extract project name from ColData[3] (customer/project column in ProfitAndLossDetail with columns=customer)
+                                    # ColData structure: [0]=Account, [1]=Date, [2]=Transaction, [3]=Customer/Project, [4]=Class/Dept, [5]=Memo, [6]=Split, [7]=Amount
+                                    project_name = None
                                     
-                                    # Normalize project name (extract from "Company:Project" format if present)
-                                    if project_name and ':' in project_name:
-                                        # Format: "Agile Six Applications Inc.:A6 CIE" -> extract "A6 CIE"
-                                        project_name = project_name.split(':')[-1].strip()
+                                    # First, try to get from ColData[3] (customer/project column)
+                                    if len(col_data) > 3:
+                                        customer_value = col_data[3].get('value', '').strip()
+                                        if customer_value:
+                                            # Normalize from "Company:Project" format if present
+                                            if ':' in customer_value:
+                                                # Format: "Agile Six Applications Inc.:A6 CIE" -> extract "A6 CIE"
+                                                project_part = customer_value.split(':')[-1].strip()
+                                                if project_part:
+                                                    customer_value = project_part
+                                            
+                                            # Check if it looks like a project name (has project indicators)
+                                            project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
+                                            if any(indicator in customer_value.lower() for indicator in project_indicators):
+                                                project_name = customer_value
+                                                logger.info(f"  ✓ Extracted project name from ColData[3]: '{project_name}'")
+                                    
+                                    # Fallback 1: Use parent customer name if available
+                                    if not project_name and current_customer_name:
+                                        # Normalize project name (extract from "Company:Project" format if present)
+                                        if ':' in current_customer_name:
+                                            project_part = current_customer_name.split(':')[-1].strip()
+                                            if project_part:
+                                                project_name = project_part
+                                                logger.info(f"  ✓ Using parent customer name: '{project_name}'")
+                                        else:
+                                            project_name = current_customer_name
+                                            logger.info(f"  ✓ Using parent customer name: '{project_name}'")
+                                    
+                                    # Fallback 2: Check ColData[4] (class/department) - but this is usually not a project name
+                                    if not project_name and len(col_data) > 4:
+                                        class_value = col_data[4].get('value', '').strip()
+                                        if class_value:
+                                            # Only use if it looks like a project name (has project indicators)
+                                            project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
+                                            if any(indicator in class_value.lower() for indicator in project_indicators):
+                                                project_name = class_value
+                                                logger.info(f"  ✓ Extracted project name from ColData[4]: '{project_name}'")
                                     
                                     # Validate that we have a valid project name (not an expense category)
                                     if project_name:
@@ -835,27 +868,7 @@ class QBODataFetcher:
                                             project_name = None
                                     
                                     if not project_name:
-                                        # Fallback: try to extract from ColData if no parent customer found
-                                        # But this will likely be a class/department code, not a project name
-                                        if len(col_data) >= 5:
-                                            customer_name = col_data[4].get('value', '').strip() if len(col_data) > 4 else ''
-                                            if not customer_name and len(col_data) > 3:
-                                                customer_name = col_data[3].get('value', '').strip()
-                                            
-                                            # Normalize from "Company:Project" format if present
-                                            if customer_name and ':' in customer_name:
-                                                customer_name = customer_name.split(':')[-1].strip()
-                                            
-                                            # Only use if it looks like a project name (has project indicators)
-                                            project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
-                                            if customer_name and any(indicator in customer_name.lower() for indicator in project_indicators):
-                                                project_name = customer_name
-                                                logger.debug(f"  Extracted project name from ColData: '{project_name}'")
-                                            else:
-                                                logger.debug(f"  ⚠️ ColData value '{customer_name}' doesn't look like a project name, skipping")
-                                    
-                                    if not project_name:
-                                        logger.warning(f"  ⚠️ No valid project name found for transaction (parent_customer='{parent_customer_name}', current_customer='{current_customer_name}'), skipping")
+                                        logger.warning(f"  ⚠️ No valid project name found for transaction (parent_customer='{parent_customer_name}', current_customer='{current_customer_name}', ColData[3]='{col_data[3].get('value', '') if len(col_data) > 3 else 'N/A'}'), skipping")
                                         continue
                                     
                                     # Map account number to account name (handle renamed accounts)
