@@ -717,6 +717,10 @@ class QBODataFetcher:
                         if header_col_data:
                             section_name = header_col_data[0].get('value', '').strip()
                     
+                    # Log ALL sections encountered (for debugging) - use INFO level so we can see them
+                    if section_name:
+                        logger.info(f"  [Depth {depth}] Section encountered: '{section_name}' (type={row.get('type', 'unknown')})")
+                    
                     # Extract account number if present
                     account_num = None
                     if section_name:
@@ -758,9 +762,9 @@ class QBODataFetcher:
                                 current_customer_name = section_name
                                 logger.info(f"  Found customer/project section at depth {depth}: {current_customer_name}")
                         elif is_expense_category:
-                            logger.debug(f"  Skipping expense category section at depth {depth}: {section_name}")
+                            logger.info(f"  [Depth {depth}] Skipping expense category section: '{section_name}'")
                         else:
-                            logger.debug(f"  Section at depth {depth} doesn't match project criteria: '{section_name}' (has_account_num={bool(account_num)}, has_project_indicator={has_project_indicator})")
+                            logger.info(f"  [Depth {depth}] Section doesn't match project criteria: '{section_name}' (has_account_num={bool(account_num)}, has_project_indicator={has_project_indicator}, is_expense_category={is_expense_category})")
                     
                     # Update account name if we found an account section
                     current_account_name = parent_account_name
@@ -774,14 +778,21 @@ class QBODataFetcher:
                         # This is a target account - process its nested transaction rows
                         if 'Rows' in row:
                             transaction_rows = self._extract_rows(row['Rows'])
+                            logger.info(f"  Processing {len(transaction_rows)} transaction rows for account {account_num}")
                             
-                            for transaction_row in transaction_rows:
+                            for i, transaction_row in enumerate(transaction_rows):
                                 if not isinstance(transaction_row, dict):
                                     continue
                                 
                                 # Transaction rows have ColData with customer/project info
                                 if 'ColData' in transaction_row:
                                     col_data = transaction_row.get('ColData', [])
+                                    
+                                    # Log ColData structure for first few transactions (for debugging)
+                                    if i < 3:
+                                        logger.info(f"  Transaction {i} ColData structure:")
+                                        for idx, col in enumerate(col_data):
+                                            logger.info(f"    ColData[{idx}]: '{col.get('value', '')}'")
                                     
                                     # Get amount from index 7
                                     amount_str = col_data[7].get('value', '0').replace(',', '').replace('$', '').strip() if len(col_data) > 7 else '0'
