@@ -674,6 +674,13 @@ class QBODataFetcher:
             
             logger.info(f"Processing {len(rows)} rows from P&L Detail by Customer report")
             
+            # Log report header structure to see if customer info is in headers
+            if 'Header' in data:
+                logger.info(f"Report Header structure: {list(data['Header'].keys()) if isinstance(data['Header'], dict) else type(data['Header'])}")
+                if isinstance(data['Header'], dict):
+                    if 'ColData' in data['Header']:
+                        logger.info(f"Report Header ColData: {data['Header']['ColData']}")
+            
             # Log first few rows to understand structure
             if rows:
                 logger.info(f"First row structure: {list(rows[0].keys()) if isinstance(rows[0], dict) else type(rows[0])}")
