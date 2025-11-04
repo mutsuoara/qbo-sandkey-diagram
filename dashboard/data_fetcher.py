@@ -727,7 +727,7 @@ class QBODataFetcher:
                     # Check if this section looks like a customer/project name (not an account number or expense category)
                     # Customer/project names typically don't start with 4 digits and aren't common expense category names
                     current_customer_name = parent_customer_name
-                    if section_name and not account_num and depth <= 2:
+                    if section_name and not account_num:
                         # Common expense category names to exclude (not customer/project names)
                         expense_category_keywords = [
                             'cost of goods sold', 'cogs', 'expenses', 'income', 'revenue',
@@ -736,17 +736,31 @@ class QBODataFetcher:
                         ]
                         
                         # Check if it looks like a project name (contains project indicators)
-                        # Only treat as customer/project if it contains project indicators, not just because it doesn't start with digits
+                        # Project indicators can appear anywhere in the name (e.g., "Agile Six Applications Inc.:A6 CIE")
                         project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
                         is_expense_category = any(keyword in section_name.lower() for keyword in expense_category_keywords)
                         has_project_indicator = any(indicator in section_name.lower() for indicator in project_indicators)
                         
                         # Only treat as customer/project if it has project indicators and is NOT an expense category
+                        # Remove depth restriction to capture project names at any depth
                         if has_project_indicator and not is_expense_category:
-                            current_customer_name = section_name
-                            logger.info(f"  Found customer/project section at depth {depth}: {current_customer_name}")
+                            # Extract project name from customer name format (e.g., "Company:Project" -> "Project")
+                            if ':' in section_name:
+                                # Format: "Agile Six Applications Inc.:A6 CIE" -> extract "A6 CIE"
+                                project_part = section_name.split(':')[-1].strip()
+                                if project_part:
+                                    current_customer_name = project_part
+                                    logger.info(f"  Found customer/project section at depth {depth}: '{section_name}' -> extracted project: '{current_customer_name}'")
+                                else:
+                                    current_customer_name = section_name
+                                    logger.info(f"  Found customer/project section at depth {depth}: {current_customer_name}")
+                            else:
+                                current_customer_name = section_name
+                                logger.info(f"  Found customer/project section at depth {depth}: {current_customer_name}")
                         elif is_expense_category:
-                            logger.debug(f"  Skipping expense category section: {section_name}")
+                            logger.debug(f"  Skipping expense category section at depth {depth}: {section_name}")
+                        else:
+                            logger.debug(f"  Section at depth {depth} doesn't match project criteria: '{section_name}' (has_account_num={bool(account_num)}, has_project_indicator={has_project_indicator})")
                     
                     # Update account name if we found an account section
                     current_account_name = parent_account_name
@@ -786,6 +800,11 @@ class QBODataFetcher:
                                     # But we want the actual project name (like "A6 Enterprise Services") from parent sections
                                     project_name = current_customer_name
                                     
+                                    # Normalize project name (extract from "Company:Project" format if present)
+                                    if project_name and ':' in project_name:
+                                        # Format: "Agile Six Applications Inc.:A6 CIE" -> extract "A6 CIE"
+                                        project_name = project_name.split(':')[-1].strip()
+                                    
                                     # Validate that we have a valid project name (not an expense category)
                                     if project_name:
                                         expense_category_keywords = [
@@ -805,19 +824,20 @@ class QBODataFetcher:
                                             if not customer_name and len(col_data) > 3:
                                                 customer_name = col_data[3].get('value', '').strip()
                                             
+                                            # Normalize from "Company:Project" format if present
+                                            if customer_name and ':' in customer_name:
+                                                customer_name = customer_name.split(':')[-1].strip()
+                                            
                                             # Only use if it looks like a project name (has project indicators)
                                             project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
                                             if customer_name and any(indicator in customer_name.lower() for indicator in project_indicators):
                                                 project_name = customer_name
+                                                logger.debug(f"  Extracted project name from ColData: '{project_name}'")
                                             else:
                                                 logger.debug(f"  ⚠️ ColData value '{customer_name}' doesn't look like a project name, skipping")
-                                        
-                                        # Normalize project name (remove parent customer prefix if present)
-                                        if project_name and ':' in project_name:
-                                            project_name = project_name.split(':')[-1].strip()
                                     
                                     if not project_name:
-                                        logger.warning(f"  ⚠️ No valid project name found for transaction, skipping")
+                                        logger.warning(f"  ⚠️ No valid project name found for transaction (parent_customer='{parent_customer_name}', current_customer='{current_customer_name}'), skipping")
                                         continue
                                     
                                     # Map account number to account name (handle renamed accounts)
