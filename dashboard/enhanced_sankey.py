@@ -137,6 +137,9 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # Store tertiary data for hover tooltips (map node index to tertiary data)
     node_tertiary_data = {}  # Map node index -> list of (tertiary_name, tertiary_amount) tuples
     
+    # Store project data for hover tooltips (map node index to project data) - Phase 3
+    node_project_data = {}  # Map node index -> dict of {project_name: project_amount}
+    
     # Income sources (left column, x=0)
     income_indices = {}
     for i, (source, amount) in enumerate(income_sources.items()):
@@ -193,12 +196,26 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                             # Store tertiary data as list of tuples for hover tooltip
                             tertiary_list = sorted(tertiaries.items(), key=lambda x: x[1], reverse=True)
                             node_tertiary_data[idx] = tertiary_list
-                            # Color code: Purple/magenta for nodes with tertiary breakdown
-                            node_colors.append("#9b59b6")  # Purple for secondary expenses with tertiaries
-                            logger.info(f"    Created secondary node with {len(tertiaries)} tertiaries (purple color): {sec_name} (idx={idx})")
+                        
+                        # Store project data for this node if it exists (Phase 3)
+                        projects = sec_data.get('projects', {})
+                        if projects:
+                            # Store project data as dict for hover tooltip
+                            node_project_data[idx] = projects
+                            logger.info(f"    Stored project data for {sec_name}: {len(projects)} projects")
+                        
+                        # Color code: Purple if node has tertiaries OR projects (has additional hover details)
+                        if tertiaries or projects:
+                            node_colors.append("#9b59b6")  # Purple for secondary expenses with breakdown
+                            breakdown_type = []
+                            if tertiaries:
+                                breakdown_type.append(f"{len(tertiaries)} tertiaries")
+                            if projects:
+                                breakdown_type.append(f"{len(projects)} projects")
+                            logger.info(f"    Created secondary node with {' and '.join(breakdown_type)} (purple color): {sec_name} (idx={idx})")
                         else:
-                            # Color code: Red for nodes without tertiaries
-                            node_colors.append("#e74c3c")  # Red for secondary expenses without tertiaries
+                            # Color code: Red for nodes without breakdown
+                            node_colors.append("#e74c3c")  # Red for secondary expenses without breakdown
                             logger.info(f"    Created secondary node (red color): {sec_name} (idx={idx})")
                         
                         secondary_indices[(primary_name, sec_name)] = idx
@@ -308,43 +325,73 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # To make Total Revenue appear larger, we increase global thickness
     # The center node (Total Revenue) will benefit from this since it has the most connections
     
-    # Create custom hover data using customdata for nodes with tertiary data
+    # Create custom hover data using customdata for nodes with tertiary or project data
     # Plotly Sankey supports customdata which can be referenced in hovertemplate
-    # All nodes get customdata - nodes with tertiaries get breakdown, others get their label
+    # All nodes get customdata - nodes with tertiaries/projects get breakdown, others get their label
     logger.info(f"Creating hover data for {len(node_labels)} nodes")
     logger.info(f"Nodes with tertiary data: {list(node_tertiary_data.keys())}")
+    logger.info(f"Nodes with project data: {list(node_project_data.keys())}")
     
     node_customdata = []  # Custom data array for hover tooltips
     
     for i in range(len(node_labels)):
-        if i in node_tertiary_data:
-            # This node has tertiary data - create custom data with breakdown
-            tertiaries = node_tertiary_data[i]
-            logger.info(f"  Node {i} ({node_labels[i].split('<br>')[0]}): Creating custom hover data with {len(tertiaries)} tertiaries")
+        has_tertiaries = i in node_tertiary_data
+        has_projects = i in node_project_data
+        
+        if has_tertiaries or has_projects:
+            # This node has breakdown data - create custom data with breakdown
+            breakdown_parts = []
             
-            # Format tertiary breakdown (show top 10, then summarize if more)
-            max_items = 10
-            tertiary_lines = []
-            for tert_name, tert_amount in tertiaries[:max_items]:
-                tertiary_lines.append(f"• {tert_name}: ${tert_amount:,.0f}")
+            # Format tertiary breakdown if exists
+            if has_tertiaries:
+                tertiaries = node_tertiary_data[i]
+                logger.info(f"  Node {i} ({node_labels[i].split('<br>')[0]}): Creating hover data with {len(tertiaries)} tertiaries")
+                
+                # Format tertiary breakdown (show top 10, then summarize if more)
+                max_items = 10
+                tertiary_lines = []
+                for tert_name, tert_amount in tertiaries[:max_items]:
+                    tertiary_lines.append(f"• {tert_name}: ${tert_amount:,.0f}")
+                
+                # If more than 10, add summary
+                if len(tertiaries) > max_items:
+                    remaining_count = len(tertiaries) - max_items
+                    remaining_total = sum(amount for _, amount in tertiaries[max_items:])
+                    tertiary_lines.append(f"...and {remaining_count} more item{'s' if remaining_count > 1 else ''}: ${remaining_total:,.0f}")
+                
+                breakdown_parts.append(("<b>Breakdown:</b><br>" + "<br>".join(tertiary_lines)))
             
-            # If more than 10, add summary
-            if len(tertiaries) > max_items:
-                remaining_count = len(tertiaries) - max_items
-                remaining_total = sum(amount for _, amount in tertiaries[max_items:])
-                tertiary_lines.append(f"...and {remaining_count} more item{'s' if remaining_count > 1 else ''}: ${remaining_total:,.0f}")
+            # Format project breakdown if exists (Phase 3)
+            if has_projects:
+                projects = node_project_data[i]
+                logger.info(f"  Node {i} ({node_labels[i].split('<br>')[0]}): Creating hover data with {len(projects)} projects")
+                
+                # Sort projects by amount (descending)
+                sorted_projects = sorted(projects.items(), key=lambda x: x[1], reverse=True)
+                
+                # Format project breakdown (show top 10, then summarize if more)
+                max_items = 10
+                project_lines = []
+                for project_name, project_amount in sorted_projects[:max_items]:
+                    project_lines.append(f"• {project_name}: ${project_amount:,.0f}")
+                
+                # If more than 10, add summary
+                if len(sorted_projects) > max_items:
+                    remaining_count = len(sorted_projects) - max_items
+                    remaining_total = sum(amount for _, amount in sorted_projects[max_items:])
+                    project_lines.append(f"...and {remaining_count} more project{'s' if remaining_count > 1 else ''}: ${remaining_total:,.0f}")
+                
+                breakdown_parts.append(("<b>Projects:</b><br>" + "<br>".join(project_lines)))
             
-            # Create custom data with tertiary breakdown
-            # Format: label + breakdown HTML
-            breakdown_html = "<br><br><b>Breakdown:</b><br>" + "<br>".join(tertiary_lines)
-            custom_text = f"{node_labels[i]}{breakdown_html}"
+            # Combine breakdowns with separator
+            breakdown_html = "<br><br>".join(breakdown_parts)
+            custom_text = f"{node_labels[i]}<br>{breakdown_html}"
             node_customdata.append(custom_text)
             
             # Debug: log first few lines
-            logger.info(f"    Custom data preview (first 100 chars): {custom_text[:100]}...")
-            logger.info(f"    First 3 tertiary items: {tertiaries[:3]}")
+            logger.info(f"    Custom data preview (first 150 chars): {custom_text[:150]}...")
         else:
-            # No tertiary data - use the label as customdata (will show same as default)
+            # No breakdown data - use the label as customdata (will show same as default)
             node_customdata.append(node_labels[i])
     
     # Create single hovertemplate that uses customdata
@@ -352,8 +399,8 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     hovertemplate = "%{customdata}<extra></extra>"
     
     # Log summary
-    custom_count = sum(1 for i in range(len(node_labels)) if i in node_tertiary_data)
-    logger.info(f"Custom hover data created: {custom_count} with tertiary breakdown, {len(node_labels) - custom_count} with label only")
+    custom_count = sum(1 for i in range(len(node_labels)) if i in node_tertiary_data or i in node_project_data)
+    logger.info(f"Custom hover data created: {custom_count} with breakdown, {len(node_labels) - custom_count} with label only")
     logger.info(f"Using hovertemplate: {hovertemplate}")
     
     # Create the enhanced Sankey diagram
