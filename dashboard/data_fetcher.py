@@ -637,38 +637,58 @@ class QBODataFetcher:
             # Check for Fault objects
             if 'Fault' in data:
                 logger.error("QuickBooks API returned a Fault object")
+                logger.error(f"Fault details: {data.get('Fault', {})}")
                 return {}
             
+            # Log the top-level keys to understand the response structure
+            logger.info(f"API Response keys: {list(data.keys())}")
             logger.info("Successfully retrieved Profit and Loss Detail by Customer report")
             
             # Parse report structure
             # The report structure will be similar to standard P&L but with customer grouping
             # Each row will have account name, customer name, and amount
             
-            # Initialize result structure
+            # Initialize result structure - use account names as keys, not just numbers
             expense_by_project = {}
-            for account_num in account_numbers:
-                expense_by_project[account_num] = {}
             
             # Extract rows from report
             if 'Rows' not in data:
                 logger.warning("No 'Rows' found in P&L Detail by Customer report")
+                logger.warning(f"Available keys in response: {list(data.keys())}")
+                # Try to log the full response structure for debugging (truncated)
+                import json
+                logger.debug(f"Response structure (first 2000 chars): {str(data)[:2000]}")
                 return {}
             
             rows_data = data['Rows']
             if isinstance(rows_data, dict) and 'Row' in rows_data:
                 rows = rows_data['Row']
+                logger.info(f"Rows is dict with 'Row' key, found {len(rows) if isinstance(rows, list) else 1} rows")
             elif isinstance(rows_data, list):
                 rows = rows_data
+                logger.info(f"Rows is a list with {len(rows)} items")
             else:
                 logger.error(f"Unexpected Rows structure: {type(rows_data)}")
+                logger.error(f"Rows data: {str(rows_data)[:500]}")
                 return {}
             
             logger.info(f"Processing {len(rows)} rows from P&L Detail by Customer report")
             
+            # Log first few rows to understand structure
+            if rows:
+                logger.info(f"First row structure: {list(rows[0].keys()) if isinstance(rows[0], dict) else type(rows[0])}")
+                if isinstance(rows[0], dict):
+                    if 'Header' in rows[0]:
+                        logger.info(f"First row Header ColData: {rows[0]['Header'].get('ColData', [])}")
+                    if 'ColData' in rows[0]:
+                        logger.info(f"First row ColData: {rows[0]['ColData']}")
+            
             # Process each row
+            row_count = 0
             for row in rows:
+                row_count += 1
                 if not isinstance(row, dict):
+                    logger.debug(f"Row {row_count}: Not a dict, skipping")
                     continue
                 
                 # Extract account name and amount from row
@@ -677,6 +697,11 @@ class QBODataFetcher:
                 account_name = None
                 customer_name = None
                 amount = 0.0
+                
+                # Log row type for first few rows
+                if row_count <= 5:
+                    logger.debug(f"Row {row_count} keys: {list(row.keys())}")
+                    logger.debug(f"Row {row_count} type: {row.get('type', 'unknown')}")
                 
                 # Try Header structure first (for Section rows)
                 if 'Header' in row:
@@ -721,13 +746,19 @@ class QBODataFetcher:
                 # Extract account number from account name
                 account_match = re.match(r'^(\d{4})', account_name)
                 if not account_match:
+                    if row_count <= 10:  # Log first 10 non-matching accounts
+                        logger.debug(f"Row {row_count}: No account number found in '{account_name}'")
                     continue
                 
                 account_num = account_match.group(1)
                 
                 # Check if this account is in our target list
                 if account_num not in account_numbers:
+                    if row_count <= 10:  # Log first 10 non-target accounts
+                        logger.debug(f"Row {row_count}: Account {account_num} not in target list {account_numbers}")
                     continue
+                
+                logger.info(f"Row {row_count}: Found target account {account_num} ({account_name})")
                 
                 # Skip summary rows
                 skip_keywords = ['total', 'subtotal', 'net income', 'gross profit']

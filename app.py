@@ -1111,6 +1111,90 @@ def test_expenses_by_project():
             "traceback": traceback.format_exc()
         })
 
+@app.server.route('/debug/expenses-by-project-raw')
+def debug_expenses_by_project_raw():
+    """Debug endpoint to see raw API response structure for ProfitAndLossDetail with customer grouping"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime, timedelta
+    from flask import jsonify
+    import json
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        if not tokens:
+            return jsonify({"error": "No tokens found"})
+        
+        environment = credentials.get('environment', 'sandbox')
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=environment
+        )
+        
+        # Get last 90 days
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)
+        
+        # Fetch raw API response
+        params = {
+            'start_date': start_date.strftime('%Y-%m-%d'),
+            'end_date': end_date.strftime('%Y-%m-%d'),
+            'columns': 'customer',  # Group by customer/project
+            'minorversion': '65'
+        }
+        
+        raw_data = data_fetcher._make_request('reports/ProfitAndLossDetail', params)
+        
+        if not raw_data:
+            return jsonify({"error": "No data returned from API"})
+        
+        # Return structure info (truncated for safety)
+        result = {
+            "success": True,
+            "date_range": {
+                "start": start_date.strftime('%Y-%m-%d'),
+                "end": end_date.strftime('%Y-%m-%d')
+            },
+            "response_keys": list(raw_data.keys()) if isinstance(raw_data, dict) else type(raw_data).__name__,
+            "has_fault": 'Fault' in raw_data if isinstance(raw_data, dict) else False,
+            "has_rows": 'Rows' in raw_data if isinstance(raw_data, dict) else False,
+            "sample_structure": {}
+        }
+        
+        # If Fault, include it
+        if isinstance(raw_data, dict) and 'Fault' in raw_data:
+            result["fault"] = raw_data['Fault']
+        
+        # If Rows, include sample structure
+        if isinstance(raw_data, dict) and 'Rows' in raw_data:
+            rows_data = raw_data['Rows']
+            if isinstance(rows_data, dict) and 'Row' in rows_data:
+                rows = rows_data['Row']
+                if isinstance(rows, list) and len(rows) > 0:
+                    result["sample_structure"]["first_row"] = rows[0]
+                    result["sample_structure"]["row_count"] = len(rows)
+                elif isinstance(rows, dict):
+                    result["sample_structure"]["first_row"] = rows
+                    result["sample_structure"]["row_count"] = 1
+            elif isinstance(rows_data, list) and len(rows_data) > 0:
+                result["sample_structure"]["first_row"] = rows_data[0]
+                result["sample_structure"]["row_count"] = len(rows_data)
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error debugging expenses by project: {e}")
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
+
 def exchange_code_for_token(code, credentials):
     """Exchange authorization code for access token"""
     try:
