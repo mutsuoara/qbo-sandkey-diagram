@@ -934,12 +934,16 @@ class QBODataFetcher:
                             logger.info(f"  ✓ Extracted project from JournalEntry EntityRef: '{project_name}'")
                         else:
                             logger.info(f"  ⚠️ EntityRef name '{entity_name}' doesn't match project criteria")
+                    else:
+                        logger.info(f"  🔍 JournalEntry: EntityRef present but no name field")
+                else:
+                    logger.info(f"  🔍 JournalEntry: No EntityRef found in line")
                 
                 # Priority 2: Description (search for project keywords)
                 if not project_name:
                     description = journal_detail.get('Description', '')
                     if description:
-                        logger.info(f"  🔍 JournalEntry: Checking Description: '{description[:100]}...'")
+                        logger.info(f"  🔍 JournalEntry: Checking Description: '{description[:200]}...'")
                         # Search for project keywords in description
                         project_keywords = [
                             'A6 Enterprise Services', 'A6 Surge Support', 'A6 DHO',
@@ -952,8 +956,10 @@ class QBODataFetcher:
                                 project_name = keyword
                                 logger.info(f"  ✓ Extracted project from JournalEntry Description: '{project_name}'")
                                 break
+                        if not project_name:
+                            logger.info(f"  ⚠️ JournalEntry: Description exists but no project keywords found")
                     else:
-                        logger.info(f"  🔍 JournalEntry: No Description found")
+                        logger.info(f"  🔍 JournalEntry: No Description found in journal_detail")
                 
                 # Skip if no project name found
                 if not project_name:
