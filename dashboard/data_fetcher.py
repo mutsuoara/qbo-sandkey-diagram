@@ -657,6 +657,24 @@ class QBODataFetcher:
             
             logger.info(f"Processing {len(row_list)} top-level rows from ProfitAndLossDetail report")
             
+            # Log structure of first row for debugging
+            if row_list and len(row_list) > 0:
+                first_row = row_list[0]
+                logger.info(f"First row keys: {list(first_row.keys())}")
+                logger.info(f"First row type: {first_row.get('type', 'N/A')}")
+                if 'ColData' in first_row:
+                    logger.info(f"First row ColData length: {len(first_row.get('ColData', []))}")
+                    logger.info(f"First row ColData[0]: {first_row.get('ColData', [{}])[0] if first_row.get('ColData') else 'N/A'}")
+                if 'Rows' in first_row:
+                    nested_rows = first_row.get('Rows', {})
+                    logger.info(f"First row has nested Rows structure: {type(nested_rows)}")
+                    if isinstance(nested_rows, dict) and 'Row' in nested_rows:
+                        nested_row_list = nested_rows['Row']
+                        logger.info(f"First row has {len(nested_row_list) if isinstance(nested_row_list, list) else 1} nested rows")
+                        if isinstance(nested_row_list, list) and len(nested_row_list) > 0:
+                            logger.info(f"First nested row keys: {list(nested_row_list[0].keys())}")
+                            logger.info(f"First nested row type: {nested_row_list[0].get('type', 'N/A')}")
+            
             # Process each row to find expenses for target accounts
             for row in row_list:
                 self._parse_pl_detail_row(row, account_numbers, expense_by_project)
@@ -718,7 +736,12 @@ class QBODataFetcher:
             if row_type == 'Data' or 'ColData' in row:
                 col_data = row.get('ColData', [])
                 if not col_data or len(col_data) < 2:
+                    logger.debug(f"  ⚠️ Skipping row - insufficient ColData (length: {len(col_data) if col_data else 0})")
                     return
+                
+                # Log ColData for debugging (for first few rows)
+                if account_numbers and ('5001' in account_numbers or '5011' in account_numbers):
+                    logger.debug(f"  🔍 Row ColData: {[col.get('value', '')[:50] for col in col_data[:5]]}")
                 
                 # Extract account name from first column
                 account_name = col_data[0].get('value', '').strip()
