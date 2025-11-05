@@ -585,8 +585,8 @@ class QBODataFetcher:
         """
         Get expenses for specific accounts broken down by project/customer
         
-        Uses Profit and Loss Detail report grouped by customer to avoid duplication
-        and match what's visible in QuickBooks "Profit and Loss by Customer" report.
+        Queries Bill and Purchase transactions directly, filtering by account numbers
+        and extracting project/customer information from CustomerRef or ClassRef.
         
         Args:
             account_numbers: List of account numbers to query (e.g., ['5001', '5011'])
@@ -615,287 +615,59 @@ class QBODataFetcher:
                 end_date = datetime.now().strftime('%Y-%m-%d')
             
             logger.info("="*80)
-            logger.info(f"FETCHING EXPENSES BY PROJECT")
+            logger.info(f"FETCHING EXPENSES BY PROJECT (Direct Transaction Query)")
             logger.info(f"Accounts: {account_numbers}")
             logger.info(f"Date range: {start_date} to {end_date}")
             logger.info("="*80)
             
-            # Fetch Profit and Loss Detail report grouped by customer
+            # Initialize result structure
+            expense_by_project = {}
+            
+            # Query Bill transactions
+            logger.info("Querying Bill transactions...")
+            bill_query = (
+                f"SELECT * FROM Bill "
+                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
+                f"MAXRESULTS 1000"
+            )
+            
             params = {
-                'start_date': start_date,
-                'end_date': end_date,
-                'columns': 'customer',  # Group by customer/project
+                'query': bill_query,
                 'minorversion': '65'
             }
             
-            data = self._make_request('reports/ProfitAndLossDetail', params)
+            bill_data = self._make_request('query', params)
+            bills = []
+            if bill_data and 'QueryResponse' in bill_data:
+                bills = bill_data['QueryResponse'].get('Bill', [])
+                logger.info(f"Found {len(bills)} Bill transactions")
             
-            if not data:
-                logger.warning("No P&L Detail by Customer data returned")
-                return {}
+            # Query Purchase transactions
+            logger.info("Querying Purchase transactions...")
+            purchase_query = (
+                f"SELECT * FROM Purchase "
+                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
+                f"MAXRESULTS 1000"
+            )
             
-            # Check for Fault objects
-            if 'Fault' in data:
-                logger.error("QuickBooks API returned a Fault object")
-                logger.error(f"Fault details: {data.get('Fault', {})}")
-                return {}
+            params = {
+                'query': purchase_query,
+                'minorversion': '65'
+            }
             
-            # Log the top-level keys to understand the response structure
-            logger.info(f"API Response keys: {list(data.keys())}")
-            logger.info("Successfully retrieved Profit and Loss Detail by Customer report")
+            purchase_data = self._make_request('query', params)
+            purchases = []
+            if purchase_data and 'QueryResponse' in purchase_data:
+                purchases = purchase_data['QueryResponse'].get('Purchase', [])
+                logger.info(f"Found {len(purchases)} Purchase transactions")
             
-            # Parse report structure
-            # The report structure will be similar to standard P&L but with customer grouping
-            # Each row will have account name, customer name, and amount
+            # Process Bill transactions
+            for bill in bills:
+                self._process_expense_transaction(bill, 'Bill', account_numbers, expense_by_project)
             
-            # Initialize result structure - use account names as keys, not just numbers
-            expense_by_project = {}
-            
-            # Extract rows from report
-            if 'Rows' not in data:
-                logger.warning("No 'Rows' found in P&L Detail by Customer report")
-                logger.warning(f"Available keys in response: {list(data.keys())}")
-                # Try to log the full response structure for debugging (truncated)
-                import json
-                logger.debug(f"Response structure (first 2000 chars): {str(data)[:2000]}")
-                return {}
-            
-            rows_data = data['Rows']
-            if isinstance(rows_data, dict) and 'Row' in rows_data:
-                rows = rows_data['Row']
-                logger.info(f"Rows is dict with 'Row' key, found {len(rows) if isinstance(rows, list) else 1} rows")
-            elif isinstance(rows_data, list):
-                rows = rows_data
-                logger.info(f"Rows is a list with {len(rows)} items")
-            else:
-                logger.error(f"Unexpected Rows structure: {type(rows_data)}")
-                logger.error(f"Rows data: {str(rows_data)[:500]}")
-                return {}
-            
-            logger.info(f"Processing {len(rows)} rows from P&L Detail by Customer report")
-            
-            # Log report header structure to see if customer info is in headers
-            if 'Header' in data:
-                logger.info(f"Report Header structure: {list(data['Header'].keys()) if isinstance(data['Header'], dict) else type(data['Header'])}")
-                if isinstance(data['Header'], dict):
-                    if 'ColData' in data['Header']:
-                        logger.info(f"Report Header ColData: {data['Header']['ColData']}")
-            
-            # Log first few rows to understand structure
-            if rows:
-                logger.info(f"First row structure: {list(rows[0].keys()) if isinstance(rows[0], dict) else type(rows[0])}")
-                if isinstance(rows[0], dict):
-                    if 'Header' in rows[0]:
-                        logger.info(f"First row Header ColData: {rows[0]['Header'].get('ColData', [])}")
-                    if 'ColData' in rows[0]:
-                        logger.info(f"First row ColData: {rows[0]['ColData']}")
-            
-            # Recursively process nested structure to find target accounts
-            def process_nested_rows(rows_to_process, depth=0, parent_account_name=None, parent_customer_name=None):
-                """
-                Recursively navigate through nested Rows structure to find target accounts
-                and extract transaction-level customer/project data
-                
-                Args:
-                    rows_to_process: Rows to process
-                    depth: Current nesting depth (0 = top level)
-                    parent_account_name: Account name from parent section
-                    parent_customer_name: Customer/Project name from parent section (e.g., "A6 Enterprise Services")
-                """
-                if not rows_to_process:
-                    return
-                
-                # Extract rows list from various structures
-                if isinstance(rows_to_process, dict) and 'Row' in rows_to_process:
-                    rows_list = rows_to_process['Row']
-                elif isinstance(rows_to_process, list):
-                    rows_list = rows_to_process
-                else:
-                    return
-                
-                for row in rows_list:
-                    if not isinstance(row, dict):
-                        continue
-                    
-                    # Get section name from Header if present
-                    section_name = None
-                    if 'Header' in row:
-                        header_col_data = row['Header'].get('ColData', [])
-                        if header_col_data:
-                            section_name = header_col_data[0].get('value', '').strip()
-                    
-                    # Log ALL sections encountered (for debugging) - use INFO level so we can see them
-                    if section_name:
-                        logger.info(f"  [Depth {depth}] Section encountered: '{section_name}' (type={row.get('type', 'unknown')})")
-                    
-                    # Extract account number if present
-                    account_num = None
-                    if section_name:
-                        account_match = re.match(r'^(\d{4})', section_name)
-                        if account_match:
-                            account_num = account_match.group(1)
-                    
-                    # Check if this section looks like a customer/project name (not an account number or expense category)
-                    # Customer/project names typically don't start with 4 digits and aren't common expense category names
-                    current_customer_name = parent_customer_name
-                    if section_name and not account_num:
-                        # Common expense category names to exclude (not customer/project names)
-                        expense_category_keywords = [
-                            'cost of goods sold', 'cogs', 'expenses', 'income', 'revenue',
-                            'ordinary income', 'ordinary expenses', 'other income', 'other expenses',
-                            'gross profit', 'net income', 'operating income'
-                        ]
-                        
-                        # Check if it looks like a project name (contains project indicators)
-                        # Project indicators can appear anywhere in the name (e.g., "Agile Six Applications Inc.:A6 CIE")
-                        project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
-                        is_expense_category = any(keyword in section_name.lower() for keyword in expense_category_keywords)
-                        has_project_indicator = any(indicator in section_name.lower() for indicator in project_indicators)
-                        
-                        # Only treat as customer/project if it has project indicators and is NOT an expense category
-                        # Remove depth restriction to capture project names at any depth
-                        if has_project_indicator and not is_expense_category:
-                            # Extract project name from customer name format (e.g., "Company:Project" -> "Project")
-                            if ':' in section_name:
-                                # Format: "Agile Six Applications Inc.:A6 CIE" -> extract "A6 CIE"
-                                project_part = section_name.split(':')[-1].strip()
-                                if project_part:
-                                    current_customer_name = project_part
-                                    logger.info(f"  Found customer/project section at depth {depth}: '{section_name}' -> extracted project: '{current_customer_name}'")
-                                else:
-                                    current_customer_name = section_name
-                                    logger.info(f"  Found customer/project section at depth {depth}: {current_customer_name}")
-                            else:
-                                current_customer_name = section_name
-                                logger.info(f"  Found customer/project section at depth {depth}: {current_customer_name}")
-                        elif is_expense_category:
-                            logger.info(f"  [Depth {depth}] Skipping expense category section: '{section_name}'")
-                        else:
-                            logger.info(f"  [Depth {depth}] Section doesn't match project criteria: '{section_name}' (has_account_num={bool(account_num)}, has_project_indicator={has_project_indicator}, is_expense_category={is_expense_category})")
-                    
-                    # Update account name if we found an account section
-                    current_account_name = parent_account_name
-                    if account_num:
-                        current_account_name = section_name
-                    
-                    # Check if this is a target account section (5001 or 5011)
-                    if account_num and account_num in account_numbers:
-                        logger.info(f"Found target account section: {account_num} ({current_account_name}) at depth {depth}, parent customer: {current_customer_name}")
-                        
-                        # This is a target account - process its nested transaction rows
-                        if 'Rows' in row:
-                            transaction_rows = self._extract_rows(row['Rows'])
-                            logger.info(f"  Processing {len(transaction_rows)} transaction rows for account {account_num}")
-                            
-                            for i, transaction_row in enumerate(transaction_rows):
-                                if not isinstance(transaction_row, dict):
-                                    continue
-                                
-                                # Transaction rows have ColData with customer/project info
-                                if 'ColData' in transaction_row:
-                                    col_data = transaction_row.get('ColData', [])
-                                    
-                                    # Log ColData structure for first few transactions (for debugging)
-                                    if i < 3:
-                                        logger.info(f"  Transaction {i} ColData structure:")
-                                        for idx, col in enumerate(col_data):
-                                            logger.info(f"    ColData[{idx}]: '{col.get('value', '')}'")
-                                    
-                                    # Get amount from index 7
-                                    amount_str = col_data[7].get('value', '0').replace(',', '').replace('$', '').strip() if len(col_data) > 7 else '0'
-                                    
-                                    try:
-                                        amount = float(amount_str) if amount_str else 0.0
-                                    except ValueError:
-                                        amount = 0.0
-                                    
-                                    # Skip if zero amount
-                                    if amount == 0:
-                                        continue
-                                    
-                                    # Extract project name from ColData[3] (customer/project column in ProfitAndLossDetail with columns=customer)
-                                    # ColData structure: [0]=Account, [1]=Date, [2]=Transaction, [3]=Customer/Project, [4]=Class/Dept, [5]=Memo, [6]=Split, [7]=Amount
-                                    project_name = None
-                                    
-                                    # First, try to get from ColData[3] (customer/project column)
-                                    if len(col_data) > 3:
-                                        customer_value = col_data[3].get('value', '').strip()
-                                        if customer_value:
-                                            # Normalize from "Company:Project" format if present
-                                            if ':' in customer_value:
-                                                # Format: "Agile Six Applications Inc.:A6 CIE" -> extract "A6 CIE"
-                                                project_part = customer_value.split(':')[-1].strip()
-                                                if project_part:
-                                                    customer_value = project_part
-                                            
-                                            # Check if it looks like a project name (has project indicators)
-                                            project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
-                                            if any(indicator in customer_value.lower() for indicator in project_indicators):
-                                                project_name = customer_value
-                                                logger.info(f"  ✓ Extracted project name from ColData[3]: '{project_name}'")
-                                    
-                                    # Fallback 1: Use parent customer name if available
-                                    if not project_name and current_customer_name:
-                                        # Normalize project name (extract from "Company:Project" format if present)
-                                        if ':' in current_customer_name:
-                                            project_part = current_customer_name.split(':')[-1].strip()
-                                            if project_part:
-                                                project_name = project_part
-                                                logger.info(f"  ✓ Using parent customer name: '{project_name}'")
-                                        else:
-                                            project_name = current_customer_name
-                                            logger.info(f"  ✓ Using parent customer name: '{project_name}'")
-                                    
-                                    # Fallback 2: Check ColData[4] (class/department) - but this is usually not a project name
-                                    if not project_name and len(col_data) > 4:
-                                        class_value = col_data[4].get('value', '').strip()
-                                        if class_value:
-                                            # Only use if it looks like a project name (has project indicators)
-                                            project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
-                                            if any(indicator in class_value.lower() for indicator in project_indicators):
-                                                project_name = class_value
-                                                logger.info(f"  ✓ Extracted project name from ColData[4]: '{project_name}'")
-                                    
-                                    # Validate that we have a valid project name (not an expense category)
-                                    if project_name:
-                                        expense_category_keywords = [
-                                            'cost of goods sold', 'cogs', 'expenses', 'income', 'revenue',
-                                            'ordinary income', 'ordinary expenses', 'other income', 'other expenses',
-                                            'gross profit', 'net income', 'operating income'
-                                        ]
-                                        if any(keyword in project_name.lower() for keyword in expense_category_keywords):
-                                            logger.warning(f"  ⚠️ Invalid project name detected (expense category): {project_name}, skipping")
-                                            project_name = None
-                                    
-                                    if not project_name:
-                                        logger.warning(f"  ⚠️ No valid project name found for transaction (parent_customer='{parent_customer_name}', current_customer='{current_customer_name}', ColData[3]='{col_data[3].get('value', '') if len(col_data) > 3 else 'N/A'}'), skipping")
-                                        continue
-                                    
-                                    # Map account number to account name (handle renamed accounts)
-                                    account_full_name = current_account_name
-                                    if account_num == '5001' and 'salaries' in current_account_name.lower():
-                                        account_full_name = "Billable Salaries and Wages"
-                                    elif account_num == '5011':
-                                        account_full_name = current_account_name  # Keep original name for 5011
-                                    
-                                    # Add to result
-                                    if account_full_name not in expense_by_project:
-                                        expense_by_project[account_full_name] = {}
-                                    
-                                    if project_name not in expense_by_project[account_full_name]:
-                                        expense_by_project[account_full_name][project_name] = 0.0
-                                    
-                                    # Use absolute value (expenses are negative in P&L)
-                                    expense_by_project[account_full_name][project_name] += abs(amount)
-                                    
-                                    logger.info(f"  📊 {account_full_name} → {project_name}: ${abs(amount):,.2f}")
-                    
-                    # Recursively process nested rows (continue searching deeper)
-                    if 'Rows' in row:
-                        process_nested_rows(row['Rows'], depth + 1, current_account_name, current_customer_name)
-            
-            # Start recursive processing from top-level rows
-            process_nested_rows(rows)
+            # Process Purchase transactions
+            for purchase in purchases:
+                self._process_expense_transaction(purchase, 'Purchase', account_numbers, expense_by_project)
             
             # Log summary
             logger.info("="*80)
@@ -915,6 +687,164 @@ class QBODataFetcher:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return {}
+    
+    def _process_expense_transaction(
+        self,
+        transaction: Dict,
+        transaction_type: str,
+        account_numbers: List[str],
+        expense_by_project: Dict[str, Dict[str, float]]
+    ):
+        """
+        Process a single Bill or Purchase transaction to extract expenses by project
+        
+        Args:
+            transaction: Bill or Purchase transaction object
+            transaction_type: 'Bill' or 'Purchase'
+            account_numbers: List of account numbers to filter (e.g., ['5001', '5011'])
+            expense_by_project: Dictionary to accumulate results
+        """
+        try:
+            # Get transaction-level customer reference
+            transaction_customer_ref = transaction.get('CustomerRef', {})
+            transaction_customer_name = transaction_customer_ref.get('name', '')
+            
+            # Process Line items
+            lines = transaction.get('Line', [])
+            if not lines:
+                return
+            
+            for line in lines:
+                # Skip group lines (they don't have direct account references)
+                if line.get('GroupLineDetail'):
+                    continue
+                
+                # Check if this line item has an account reference
+                # Bill transactions use ExpenseLineDetail, Purchase transactions may use various types
+                line_detail = (
+                    line.get('ExpenseLineDetail') or 
+                    line.get('ItemBasedExpenseLineDetail') or 
+                    line.get('AccountBasedExpenseLineDetail') or
+                    line.get('SalesItemLineDetail')
+                )
+                if not line_detail:
+                    continue
+                
+                account_ref = line_detail.get('AccountRef', {})
+                account_name = account_ref.get('name', '')
+                account_id = account_ref.get('value', '')
+                
+                # Extract account number from account name (e.g., "5001 Salaries & wages" -> "5001")
+                account_num = None
+                if account_name:
+                    account_match = re.match(r'^(\d{4})', account_name)
+                    if account_match:
+                        account_num = account_match.group(1)
+                
+                # Skip if not a target account
+                if not account_num or account_num not in account_numbers:
+                    continue
+                
+                # Get amount from line
+                amount = float(line.get('Amount', 0))
+                if amount == 0:
+                    continue
+                
+                # Extract project name from CustomerRef or ClassRef
+                project_name = None
+                
+                # Priority 1: Line-level CustomerRef (if present)
+                line_customer_ref = line_detail.get('CustomerRef', {})
+                if line_customer_ref:
+                    customer_name = line_customer_ref.get('name', '')
+                    if customer_name:
+                        project_name = self._extract_project_name(customer_name)
+                        if project_name:
+                            logger.info(f"  ✓ Extracted project from line CustomerRef: '{project_name}'")
+                
+                # Priority 2: Transaction-level CustomerRef
+                if not project_name and transaction_customer_name:
+                    project_name = self._extract_project_name(transaction_customer_name)
+                    if project_name:
+                        logger.info(f"  ✓ Extracted project from transaction CustomerRef: '{project_name}'")
+                
+                # Priority 3: ClassRef (may contain project info)
+                if not project_name:
+                    class_ref = line_detail.get('ClassRef', {})
+                    if class_ref:
+                        class_name = class_ref.get('name', '')
+                        if class_name:
+                            # Check if class name looks like a project (has project indicators)
+                            project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
+                            if any(indicator in class_name.lower() for indicator in project_indicators):
+                                project_name = self._extract_project_name(class_name)
+                                if project_name:
+                                    logger.info(f"  ✓ Extracted project from ClassRef: '{project_name}'")
+                
+                # Skip if no project name found
+                if not project_name:
+                    logger.debug(f"  ⚠️ No project name found for {transaction_type} transaction (Account: {account_name}, Amount: ${amount:,.2f})")
+                    continue
+                
+                # Map account number to account name (handle renamed accounts)
+                account_full_name = account_name
+                if account_num == '5001' and 'salaries' in account_name.lower():
+                    account_full_name = "Billable Salaries and Wages"
+                elif account_num == '5011':
+                    account_full_name = account_name  # Keep original name for 5011
+                
+                # Add to result
+                if account_full_name not in expense_by_project:
+                    expense_by_project[account_full_name] = {}
+                
+                if project_name not in expense_by_project[account_full_name]:
+                    expense_by_project[account_full_name][project_name] = 0.0
+                
+                # Use absolute value (expenses can be negative)
+                expense_by_project[account_full_name][project_name] += abs(amount)
+                
+                logger.info(f"  📊 {account_full_name} → {project_name}: ${abs(amount):,.2f} ({transaction_type})")
+        
+        except Exception as e:
+            logger.error(f"Error processing {transaction_type} transaction: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def _extract_project_name(self, name: str) -> Optional[str]:
+        """
+        Extract and normalize project name from customer/class name
+        
+        Args:
+            name: Customer or class name (may be in "Company:Project" format)
+        
+        Returns:
+            Normalized project name, or None if not a valid project
+        """
+        if not name:
+            return None
+        
+        # Normalize from "Company:Project" format if present
+        if ':' in name:
+            # Format: "Agile Six Applications Inc.:A6 CIE" -> extract "A6 CIE"
+            project_part = name.split(':')[-1].strip()
+            if project_part:
+                name = project_part
+        
+        # Check if it looks like a project name (has project indicators)
+        project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
+        if not any(indicator in name.lower() for indicator in project_indicators):
+            return None
+        
+        # Validate that it's not an expense category
+        expense_category_keywords = [
+            'cost of goods sold', 'cogs', 'expenses', 'income', 'revenue',
+            'ordinary income', 'ordinary expenses', 'other income', 'other expenses',
+            'gross profit', 'net income', 'operating income'
+        ]
+        if any(keyword in name.lower() for keyword in expense_category_keywords):
+            return None
+        
+        return name
     
     def get_balance_sheet(self, start_date: str = None, end_date: str = None) -> Optional[Dict]:
         """
