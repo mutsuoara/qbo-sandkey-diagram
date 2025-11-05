@@ -848,6 +848,11 @@ class QBODataFetcher:
             expense_by_project: Dictionary to accumulate results
         """
         try:
+            # Get transaction-level fields (may contain project info)
+            txn_description = journal_entry.get('PrivateNote', '') or journal_entry.get('Description', '')
+            txn_doc_number = journal_entry.get('DocNumber', '')
+            logger.info(f"  🔍 JournalEntry Transaction: DocNumber='{txn_doc_number}', Description='{txn_description[:200] if txn_description else ''}'")
+            
             # Process Line items
             lines = journal_entry.get('Line', [])
             if not lines:
@@ -939,11 +944,11 @@ class QBODataFetcher:
                 else:
                     logger.info(f"  🔍 JournalEntry: No EntityRef found in line")
                 
-                # Priority 2: Description (search for project keywords)
+                # Priority 2: Line-level Description (search for project keywords)
                 if not project_name:
                     description = journal_detail.get('Description', '')
                     if description:
-                        logger.info(f"  🔍 JournalEntry: Checking Description: '{description[:200]}...'")
+                        logger.info(f"  🔍 JournalEntry: Checking line Description: '{description[:200]}...'")
                         # Search for project keywords in description
                         project_keywords = [
                             'A6 Enterprise Services', 'A6 Surge Support', 'A6 DHO',
@@ -954,12 +959,29 @@ class QBODataFetcher:
                         for keyword in project_keywords:
                             if keyword.lower() in description.lower():
                                 project_name = keyword
-                                logger.info(f"  ✓ Extracted project from JournalEntry Description: '{project_name}'")
+                                logger.info(f"  ✓ Extracted project from JournalEntry line Description: '{project_name}'")
                                 break
                         if not project_name:
-                            logger.info(f"  ⚠️ JournalEntry: Description exists but no project keywords found")
+                            logger.info(f"  ⚠️ JournalEntry: Line Description exists but no project keywords found")
                     else:
                         logger.info(f"  🔍 JournalEntry: No Description found in journal_detail")
+                
+                # Priority 3: Transaction-level Description or PrivateNote (search for project keywords)
+                if not project_name and txn_description:
+                    logger.info(f"  🔍 JournalEntry: Checking transaction-level Description: '{txn_description[:200]}...'")
+                    project_keywords = [
+                        'A6 Enterprise Services', 'A6 Surge Support', 'A6 DHO',
+                        'A6 Financial Management', 'A6 CIE', 'A6 Cross Benefits',
+                        'A6 CHAMPVA', 'A6 Toxic Exposure', 'A6 VA Form Engine',
+                        'CDSP', 'TWS FLRA', 'Perigean', 'DMVA'
+                    ]
+                    for keyword in project_keywords:
+                        if keyword.lower() in txn_description.lower():
+                            project_name = keyword
+                            logger.info(f"  ✓ Extracted project from JournalEntry transaction Description: '{project_name}'")
+                            break
+                    if not project_name:
+                        logger.info(f"  ⚠️ JournalEntry: Transaction Description exists but no project keywords found")
                 
                 # Skip if no project name found
                 if not project_name:
