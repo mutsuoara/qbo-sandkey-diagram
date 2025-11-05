@@ -1043,10 +1043,23 @@ class QBODataFetcher:
                     if not project_name:
                         logger.info(f"  ⚠️ JournalEntry: Transaction Description exists but no project keywords found")
                 
-                # Skip if no project name found
+                # If no project name found, categorize as "Unallocated" to ensure all expenses are included
                 if not project_name:
-                    logger.info(f"  ⚠️ No project name found for JournalEntry (Account: {account_name}, Amount: ${expense_amount:,.2f}, PostingType: {posting_type})")
-                    continue
+                    # Check if there's a pattern in the description that might indicate category
+                    line_description = line.get('Description', '')
+                    description_lower = line_description.lower() if line_description else ''
+                    
+                    # Check for common patterns
+                    if 'general and administrative' in description_lower or '9-general' in description_lower:
+                        project_name = "General & Administrative"
+                        logger.info(f"  ✓ Categorized as 'General & Administrative' from description pattern")
+                    elif 'business development' in description_lower or '9-business' in description_lower:
+                        project_name = "Business Development"
+                        logger.info(f"  ✓ Categorized as 'Business Development' from description pattern")
+                    else:
+                        # Default to "Unallocated" for expenses without project names
+                        project_name = "Unallocated"
+                        logger.info(f"  ⚠️ No project name found - categorizing as 'Unallocated' (Account: {account_name}, Amount: ${expense_amount:,.2f})")
                 
                 # Map account number to account name (handle renamed accounts)
                 account_full_name = account_name
