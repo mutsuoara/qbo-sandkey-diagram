@@ -862,6 +862,10 @@ class QBODataFetcher:
                 account_ref = journal_detail.get('AccountRef', {})
                 account_name = account_ref.get('name', '')
                 
+                # Log all accounts that might be relevant (for debugging)
+                if account_name and ('500' in account_name or 'salar' in account_name.lower() or 'wage' in account_name.lower()):
+                    logger.info(f"  🔍 JournalEntry: Found account '{account_name}' (checking if target...)")
+                
                 # Extract account number from account name (e.g., "5001 Salaries & wages" -> "5001")
                 account_num = None
                 if account_name:
