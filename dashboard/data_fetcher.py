@@ -931,49 +931,102 @@ class QBODataFetcher:
                     logger.info(f"  🔍 JournalEntry: {account_name} - Zero amount, skipping")
                     continue
                 
-                # Extract project name from EntityRef or Description
+                # Extract project name from various fields
                 project_name = None
                 
-                # Priority 1: EntityRef (if present)
-                entity = line.get('Entity', {})
-                entity_ref = entity.get('EntityRef', {})
-                if entity_ref:
-                    entity_name = entity_ref.get('name', '')
-                    if entity_name:
-                        logger.info(f"  🔍 JournalEntry: Found EntityRef name: '{entity_name}'")
-                        project_name = self._extract_project_name(entity_name)
+                # Priority 1: ProjectRef (if present at line level)
+                project_ref = line.get('ProjectRef', {})
+                if project_ref:
+                    project_ref_name = project_ref.get('name', '')
+                    if project_ref_name:
+                        logger.info(f"  🔍 JournalEntry: Found ProjectRef name: '{project_ref_name}'")
+                        project_name = self._extract_project_name(project_ref_name)
                         if project_name:
-                            logger.info(f"  ✓ Extracted project from JournalEntry EntityRef: '{project_name}'")
+                            logger.info(f"  ✓ Extracted project from JournalEntry ProjectRef: '{project_name}'")
                         else:
-                            logger.info(f"  ⚠️ EntityRef name '{entity_name}' doesn't match project criteria")
-                    else:
-                        logger.info(f"  🔍 JournalEntry: EntityRef present but no name field")
-                else:
-                    logger.info(f"  🔍 JournalEntry: No EntityRef found in line")
+                            logger.info(f"  ⚠️ ProjectRef name '{project_ref_name}' doesn't match project criteria")
                 
-                # Priority 2: Line-level Description (search for project keywords)
+                # Priority 2: EntityRef (if present)
                 if not project_name:
-                    description = journal_detail.get('Description', '')
-                    if description:
-                        logger.info(f"  🔍 JournalEntry: Checking line Description: '{description[:200]}...'")
-                        # Search for project keywords in description
+                    entity = line.get('Entity', {})
+                    entity_ref = entity.get('EntityRef', {})
+                    if entity_ref:
+                        entity_name = entity_ref.get('name', '')
+                        if entity_name:
+                            logger.info(f"  🔍 JournalEntry: Found EntityRef name: '{entity_name}'")
+                            project_name = self._extract_project_name(entity_name)
+                            if project_name:
+                                logger.info(f"  ✓ Extracted project from JournalEntry EntityRef: '{project_name}'")
+                            else:
+                                logger.info(f"  ⚠️ EntityRef name '{entity_name}' doesn't match project criteria")
+                        else:
+                            logger.info(f"  🔍 JournalEntry: EntityRef present but no name field")
+                    else:
+                        logger.info(f"  🔍 JournalEntry: No EntityRef found in line")
+                
+                # Priority 3: Line-level Description (search for project keywords)
+                # NOTE: Description is at the LINE level, not in journal_detail!
+                # Map descriptions like "Agile Six Enterprise Services" to "A6 Enterprise Services"
+                if not project_name:
+                    line_description = line.get('Description', '')
+                    if line_description:
+                        logger.info(f"  🔍 JournalEntry: Checking line-level Description: '{line_description[:200]}...'")
+                        # Project names used on income side (standard format)
                         project_keywords = [
                             'A6 Enterprise Services', 'A6 Surge Support', 'A6 DHO',
                             'A6 Financial Management', 'A6 CIE', 'A6 Cross Benefits',
                             'A6 CHAMPVA', 'A6 Toxic Exposure', 'A6 VA Form Engine',
                             'CDSP', 'TWS FLRA', 'Perigean', 'DMVA'
                         ]
+                        # Mapping from variations to standard names
+                        project_variations = {
+                            'agile six enterprise services': 'A6 Enterprise Services',
+                            'agile six surge support': 'A6 Surge Support',
+                            'agile six dho': 'A6 DHO',
+                            'agile six financial management': 'A6 Financial Management',
+                            'agile six cie': 'A6 CIE',
+                            'agile six cross benefits': 'A6 Cross Benefits',
+                            'agile six champva': 'A6 CHAMPVA',
+                            'agile six toxic exposure': 'A6 Toxic Exposure',
+                            'agile six va form engine': 'A6 VA Form Engine',
+                        }
+                        
+                        description_lower = line_description.lower()
+                        
+                        # First, check for exact project keyword matches
                         for keyword in project_keywords:
-                            if keyword.lower() in description.lower():
+                            if keyword.lower() in description_lower:
                                 project_name = keyword
                                 logger.info(f"  ✓ Extracted project from JournalEntry line Description: '{project_name}'")
                                 break
+                        
+                        # If no exact match, check for variations (e.g., "Agile Six Enterprise Services")
+                        if not project_name:
+                            for variation, standard_name in project_variations.items():
+                                if variation in description_lower:
+                                    project_name = standard_name
+                                    logger.info(f"  ✓ Extracted project from JournalEntry line Description (variation match): '{variation}' -> '{project_name}'")
+                                    break
+                        
                         if not project_name:
                             logger.info(f"  ⚠️ JournalEntry: Line Description exists but no project keywords found")
                     else:
-                        logger.info(f"  🔍 JournalEntry: No Description found in journal_detail")
+                        logger.info(f"  🔍 JournalEntry: No Description found at line level")
                 
-                # Priority 3: Transaction-level Description or PrivateNote (search for project keywords)
+                # Priority 4: ClassRef (if present in journal_detail)
+                if not project_name:
+                    class_ref = journal_detail.get('ClassRef', {})
+                    if class_ref:
+                        class_name = class_ref.get('name', '')
+                        if class_name:
+                            logger.info(f"  🔍 JournalEntry: Found ClassRef name: '{class_name}'")
+                            project_name = self._extract_project_name(class_name)
+                            if project_name:
+                                logger.info(f"  ✓ Extracted project from JournalEntry ClassRef: '{project_name}'")
+                            else:
+                                logger.info(f"  ⚠️ ClassRef name '{class_name}' doesn't match project criteria")
+                
+                # Priority 5: Transaction-level Description or PrivateNote (search for project keywords)
                 if not project_name and txn_description:
                     logger.info(f"  🔍 JournalEntry: Checking transaction-level Description: '{txn_description[:200]}...'")
                     project_keywords = [
