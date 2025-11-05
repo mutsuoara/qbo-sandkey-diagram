@@ -1158,6 +1158,73 @@ def test_journal_entries_sample():
         
         journal_entries = journal_data['QueryResponse'].get('JournalEntry', [])
         
+        # Analyze structure and log consistencies
+        if journal_entries:
+            logger.info("="*80)
+            logger.info("JOURNAL ENTRY STRUCTURE ANALYSIS")
+            logger.info("="*80)
+            
+            # Find common top-level fields
+            all_keys = set(journal_entries[0].keys())
+            for entry in journal_entries[1:]:
+                all_keys.intersection_update(set(entry.keys()))
+            
+            logger.info(f"Common top-level fields (present in all {len(journal_entries)} entries):")
+            for key in sorted(all_keys):
+                logger.info(f"  ✓ {key}")
+            
+            # Count field presence
+            from collections import Counter
+            field_counts = Counter()
+            for entry in journal_entries:
+                field_counts.update(entry.keys())
+            
+            logger.info(f"\nField presence across {len(journal_entries)} entries:")
+            for field, count in sorted(field_counts.items(), key=lambda x: (-x[1], x[0])):
+                percentage = (count / len(journal_entries)) * 100
+                status = "✓" if count == len(journal_entries) else "⚠"
+                logger.info(f"  {status} {field}: {count}/{len(journal_entries)} ({percentage:.1f}%)")
+            
+            # Analyze Line structure
+            line_fields = Counter()
+            line_detail_fields = Counter()
+            entries_with_lines = 0
+            
+            for entry in journal_entries:
+                lines = entry.get('Line', [])
+                if lines:
+                    entries_with_lines += 1
+                    for line in lines:
+                        line_fields.update(line.keys())
+                        journal_detail = line.get('JournalEntryLineDetail', {})
+                        if journal_detail:
+                            line_detail_fields.update(journal_detail.keys())
+            
+            logger.info(f"\nLine structure analysis:")
+            logger.info(f"  Entries with 'Line' array: {entries_with_lines}/{len(journal_entries)}")
+            if line_fields:
+                logger.info(f"  Common Line fields (top {min(10, len(line_fields))}):")
+                for field, count in sorted(line_fields.items(), key=lambda x: -x[1])[:10]:
+                    logger.info(f"    • {field}: appears {count} times")
+            
+            if line_detail_fields:
+                logger.info(f"  Common JournalEntryLineDetail fields:")
+                for field, count in sorted(line_detail_fields.items(), key=lambda x: -x[1]):
+                    logger.info(f"    • {field}: appears {count} times")
+            
+            # Show sample entry
+            sample = journal_entries[0]
+            logger.info(f"\nSample entry (DocNumber: {sample.get('DocNumber', 'N/A')}):")
+            logger.info(f"  Top-level keys: {sorted(sample.keys())}")
+            if sample.get('Line'):
+                first_line = sample['Line'][0]
+                logger.info(f"  First Line keys: {sorted(first_line.keys())}")
+                if 'JournalEntryLineDetail' in first_line:
+                    detail = first_line['JournalEntryLineDetail']
+                    logger.info(f"  JournalEntryLineDetail keys: {sorted(detail.keys())}")
+            
+            logger.info("="*80)
+        
         # Return all fields from the first 10 entries
         result = {
             "success": True,
