@@ -680,6 +680,14 @@ class QBODataFetcher:
                 journal_entries = journal_data['QueryResponse'].get('JournalEntry', [])
                 logger.info(f"Found {len(journal_entries)} JournalEntry transactions")
             
+            # Track JournalEntry statistics
+            journal_entry_stats = {
+                'total_transactions': len(journal_entries),
+                'unique_doc_numbers': set(),
+                'processed_with_expenses': 0,
+                'by_project': {}
+            }
+            
             # Process Bill transactions
             for bill in bills:
                 self._process_expense_transaction(bill, 'Bill', account_numbers, expense_by_project)
@@ -690,7 +698,40 @@ class QBODataFetcher:
             
             # Process Journal Entry transactions
             for journal_entry in journal_entries:
-                self._process_journal_entry_expense(journal_entry, account_numbers, expense_by_project)
+                doc_number = journal_entry.get('DocNumber', '')
+                if doc_number:
+                    journal_entry_stats['unique_doc_numbers'].add(doc_number)
+                
+                # Track expenses before processing
+                before_total = sum(
+                    sum(projects.values()) 
+                    for projects in expense_by_project.values()
+                )
+                
+                # Process the journal entry
+                self._process_journal_entry_expense(journal_entry, account_numbers, expense_by_project, journal_entry_stats)
+                
+                # Track expenses after processing
+                after_total = sum(
+                    sum(projects.values()) 
+                    for projects in expense_by_project.values()
+                )
+                
+                # If expenses were added, this entry contributed
+                if after_total > before_total:
+                    journal_entry_stats['processed_with_expenses'] += 1
+            
+            # Log JournalEntry statistics
+            logger.info("="*80)
+            logger.info("JOURNAL ENTRY STATISTICS:")
+            logger.info(f"  Total JournalEntry transactions queried: {journal_entry_stats['total_transactions']}")
+            logger.info(f"  Unique JournalEntry DocNumbers: {len(journal_entry_stats['unique_doc_numbers'])}")
+            logger.info(f"  JournalEntries with account 5001/5011 expenses: {journal_entry_stats['processed_with_expenses']}")
+            logger.info("")
+            logger.info("  Unique JournalEntries by Project/Category:")
+            for project_name, doc_numbers in sorted(journal_entry_stats['by_project'].items(), key=lambda x: len(x[1]), reverse=True):
+                logger.info(f"    • {project_name}: {len(doc_numbers)} unique entries")
+            logger.info("="*80)
             
             # Log summary
             logger.info("="*80)
@@ -837,7 +878,8 @@ class QBODataFetcher:
         self,
         journal_entry: Dict,
         account_numbers: List[str],
-        expense_by_project: Dict[str, Dict[str, float]]
+        expense_by_project: Dict[str, Dict[str, float]],
+        journal_entry_stats: Dict = None
     ):
         """
         Process a Journal Entry transaction to extract expenses by project
@@ -1078,6 +1120,13 @@ class QBODataFetcher:
                 expense_by_project[account_full_name][project_name] += expense_amount
                 
                 logger.info(f"  📊 {account_full_name} → {project_name}: ${expense_amount:,.2f} (JournalEntry)")
+                
+                # Track journal entry statistics
+                if journal_entry_stats is not None:
+                    doc_number = journal_entry.get('DocNumber', 'N/A')
+                    if project_name not in journal_entry_stats['by_project']:
+                        journal_entry_stats['by_project'][project_name] = set()
+                    journal_entry_stats['by_project'][project_name].add(doc_number)
         
         except Exception as e:
             logger.error(f"Error processing JournalEntry transaction: {e}")
