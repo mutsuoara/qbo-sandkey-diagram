@@ -1107,6 +1107,78 @@ def test_expenses_by_project():
             "traceback": traceback.format_exc()
         })
 
+@app.server.route('/test/journal-entries-sample')
+def test_journal_entries_sample():
+    """Test endpoint to pull the first 10 journal entries with all available fields"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime, timedelta
+    from flask import jsonify
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        if not tokens:
+            return jsonify({"error": "No tokens found"})
+        
+        environment = credentials.get('environment', 'sandbox')
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=environment
+        )
+        
+        # Get last 90 days
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)
+        
+        # Query Journal Entry transactions
+        journal_query = (
+            f"SELECT * FROM JournalEntry "
+            f"WHERE TxnDate >= '{start_date.strftime('%Y-%m-%d')}' AND TxnDate <= '{end_date.strftime('%Y-%m-%d')}' "
+            f"MAXRESULTS 10"
+        )
+        
+        params = {
+            'query': journal_query,
+            'minorversion': '65'
+        }
+        
+        journal_data = data_fetcher._make_request('query', params)
+        
+        if not journal_data or 'QueryResponse' not in journal_data:
+            return jsonify({
+                "success": False,
+                "error": "No journal entry data returned",
+                "query": journal_query
+            })
+        
+        journal_entries = journal_data['QueryResponse'].get('JournalEntry', [])
+        
+        # Return all fields from the first 10 entries
+        result = {
+            "success": True,
+            "date_range": {
+                "start": start_date.strftime('%Y-%m-%d'),
+                "end": end_date.strftime('%Y-%m-%d')
+            },
+            "total_entries_found": len(journal_entries),
+            "entries": journal_entries  # Return all fields as-is
+        }
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"Error fetching journal entries sample: {e}")
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
+
 @app.server.route('/debug/expenses-by-project-raw')
 def debug_expenses_by_project_raw():
     """Debug endpoint to see raw API response structure for ProfitAndLossDetail with customer grouping"""
