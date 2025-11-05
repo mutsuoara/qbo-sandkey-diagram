@@ -585,8 +585,11 @@ class QBODataFetcher:
         """
         Get expenses for specific accounts broken down by project/customer
         
-        Queries Bill and Purchase transactions directly, filtering by account numbers
-        and extracting project/customer information from CustomerRef or ClassRef.
+        Uses ProfitAndLossDetail report with columns=customer to get transaction-level
+        expense data grouped by customer/project. This matches the "Profit and Loss by Customer"
+        report in QuickBooks.
+        
+        Reference: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/report-entities/profitandlossdetail
         
         Args:
             account_numbers: List of account numbers to query (e.g., ['5001', '5011'])
@@ -615,123 +618,48 @@ class QBODataFetcher:
                 end_date = datetime.now().strftime('%Y-%m-%d')
             
             logger.info("="*80)
-            logger.info(f"FETCHING EXPENSES BY PROJECT (Direct Transaction Query)")
+            logger.info(f"FETCHING EXPENSES BY PROJECT (ProfitAndLossDetail Report)")
             logger.info(f"Accounts: {account_numbers}")
             logger.info(f"Date range: {start_date} to {end_date}")
             logger.info("="*80)
             
+            # Fetch ProfitAndLossDetail report grouped by customer
+            params = {
+                'start_date': start_date,
+                'end_date': end_date,
+                'columns': 'customer',  # Group by customer/project
+                'minorversion': '65'
+            }
+            
+            logger.info("Fetching ProfitAndLossDetail report with columns=customer...")
+            pl_detail_data = self._make_request('reports/ProfitAndLossDetail', params)
+            
+            if not pl_detail_data:
+                logger.error("No data returned from ProfitAndLossDetail report")
+                return {}
+            
             # Initialize result structure
             expense_by_project = {}
             
-            # Query Bill transactions
-            logger.info("Querying Bill transactions...")
-            bill_query = (
-                f"SELECT * FROM Bill "
-                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
-                f"MAXRESULTS 1000"
-            )
+            # Parse the report structure
+            # The report has a hierarchical structure with Rows containing Row items
+            # Each row represents an account, and when grouped by customer, it shows customer breakdown
+            rows = pl_detail_data.get('Rows', {})
+            if not rows:
+                logger.warning("No Rows found in ProfitAndLossDetail report")
+                return {}
             
-            params = {
-                'query': bill_query,
-                'minorversion': '65'
-            }
+            # Extract rows from the structure
+            row_list = rows.get('Row', [])
+            if not row_list:
+                logger.warning("No Row items found in ProfitAndLossDetail report")
+                return {}
             
-            bill_data = self._make_request('query', params)
-            bills = []
-            if bill_data and 'QueryResponse' in bill_data:
-                bills = bill_data['QueryResponse'].get('Bill', [])
-                logger.info(f"Found {len(bills)} Bill transactions")
+            logger.info(f"Processing {len(row_list)} top-level rows from ProfitAndLossDetail report")
             
-            # Query Purchase transactions
-            logger.info("Querying Purchase transactions...")
-            purchase_query = (
-                f"SELECT * FROM Purchase "
-                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
-                f"MAXRESULTS 1000"
-            )
-            
-            params = {
-                'query': purchase_query,
-                'minorversion': '65'
-            }
-            
-            purchase_data = self._make_request('query', params)
-            purchases = []
-            if purchase_data and 'QueryResponse' in purchase_data:
-                purchases = purchase_data['QueryResponse'].get('Purchase', [])
-                logger.info(f"Found {len(purchases)} Purchase transactions")
-            
-            # Query Journal Entry transactions (for payroll/account 5001)
-            logger.info("Querying JournalEntry transactions...")
-            journal_query = (
-                f"SELECT * FROM JournalEntry "
-                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
-                f"MAXRESULTS 1000"
-            )
-            
-            params = {
-                'query': journal_query,
-                'minorversion': '65'
-            }
-            
-            journal_data = self._make_request('query', params)
-            journal_entries = []
-            if journal_data and 'QueryResponse' in journal_data:
-                journal_entries = journal_data['QueryResponse'].get('JournalEntry', [])
-                logger.info(f"Found {len(journal_entries)} JournalEntry transactions")
-            
-            # Track JournalEntry statistics
-            journal_entry_stats = {
-                'total_transactions': len(journal_entries),
-                'unique_doc_numbers': set(),
-                'processed_with_expenses': 0,
-                'by_project': {}
-            }
-            
-            # Process Bill transactions
-            for bill in bills:
-                self._process_expense_transaction(bill, 'Bill', account_numbers, expense_by_project)
-            
-            # Process Purchase transactions
-            for purchase in purchases:
-                self._process_expense_transaction(purchase, 'Purchase', account_numbers, expense_by_project)
-            
-            # Process Journal Entry transactions
-            for journal_entry in journal_entries:
-                doc_number = journal_entry.get('DocNumber', '')
-                if doc_number:
-                    journal_entry_stats['unique_doc_numbers'].add(doc_number)
-                
-                # Track expenses before processing
-                before_total = sum(
-                    sum(projects.values()) 
-                    for projects in expense_by_project.values()
-                )
-                
-                # Process the journal entry
-                self._process_journal_entry_expense(journal_entry, account_numbers, expense_by_project, journal_entry_stats)
-                
-                # Track expenses after processing
-                after_total = sum(
-                    sum(projects.values()) 
-                    for projects in expense_by_project.values()
-                )
-                
-                # If expenses were added, this entry contributed
-                if after_total > before_total:
-                    journal_entry_stats['processed_with_expenses'] += 1
-            
-            # Log JournalEntry statistics
-            logger.info("="*80)
-            logger.info("JOURNAL ENTRY STATISTICS:")
-            logger.info(f"  Total JournalEntry transactions queried: {journal_entry_stats['total_transactions']}")
-            logger.info(f"  Unique JournalEntry DocNumbers: {len(journal_entry_stats['unique_doc_numbers'])}")
-            logger.info(f"  JournalEntries with account 5001/5011 expenses: {journal_entry_stats['processed_with_expenses']}")
-            logger.info("")
-            logger.info("  Unique JournalEntries by Project/Category:")
-            for project_name, doc_numbers in sorted(journal_entry_stats['by_project'].items(), key=lambda x: len(x[1]), reverse=True):
-                logger.info(f"    • {project_name}: {len(doc_numbers)} unique entries")
-            logger.info("="*80)
+            # Process each row to find expenses for target accounts
+            for row in row_list:
+                self._parse_pl_detail_row(row, account_numbers, expense_by_project)
             
             # Log summary
             logger.info("="*80)
@@ -751,6 +679,151 @@ class QBODataFetcher:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return {}
+    
+    def _parse_pl_detail_row(
+        self,
+        row: Dict,
+        account_numbers: List[str],
+        expense_by_project: Dict[str, Dict[str, float]]
+    ):
+        """
+        Parse a row from ProfitAndLossDetail report to extract expenses by project
+        
+        When columns=customer, the report structure shows:
+        - Account name in ColData[0]
+        - Customer/project name in ColData (customer column)
+        - Amount in ColData (amount column)
+        - Transaction type (Bill, Journal Entry, etc.)
+        - ClassRef information
+        
+        Args:
+            row: Row dictionary from ProfitAndLossDetail report
+            account_numbers: List of account numbers to filter (e.g., ['5001', '5011'])
+            expense_by_project: Dictionary to accumulate results
+        """
+        try:
+            # Handle different row types (Section, Data, Summary)
+            row_type = row.get('type', '')
+            
+            # If this row has nested rows (Sections), process them recursively
+            if 'Rows' in row and row.get('Rows'):
+                nested_rows = row['Rows'].get('Row', [])
+                if isinstance(nested_rows, list):
+                    for nested_row in nested_rows:
+                        self._parse_pl_detail_row(nested_row, account_numbers, expense_by_project)
+                elif isinstance(nested_rows, dict):
+                    self._parse_pl_detail_row(nested_rows, account_numbers, expense_by_project)
+            
+            # For Data rows, extract account and customer information
+            if row_type == 'Data' or 'ColData' in row:
+                col_data = row.get('ColData', [])
+                if not col_data or len(col_data) < 2:
+                    return
+                
+                # Extract account name from first column
+                account_name = col_data[0].get('value', '').strip()
+                if not account_name:
+                    return
+                
+                # Extract account number from account name
+                account_match = re.match(r'^(\d{4})', account_name)
+                if not account_match:
+                    return
+                
+                account_num = account_match.group(1)
+                
+                # Skip if not a target account
+                if account_num not in account_numbers:
+                    return
+                
+                # Extract amount from the appropriate column
+                # The amount column varies - typically the last numeric column
+                amount = 0.0
+                for col in col_data:
+                    amount_str = col.get('value', '').replace(',', '').replace('$', '').strip()
+                    if amount_str:
+                        try:
+                            amount = float(amount_str)
+                            if amount != 0:
+                                break
+                        except ValueError:
+                            continue
+                
+                if amount == 0:
+                    return
+                
+                # Extract customer/project name from customer column
+                # When columns=customer, the customer name appears in one of the ColData columns
+                # Based on the report structure, we need to find the customer column
+                customer_name = None
+                
+                # Check for customer information in ColData
+                # The customer column might be in a different position depending on report structure
+                # Look for customer name in ColData (usually after account name, before amount)
+                for i, col in enumerate(col_data[1:], start=1):  # Skip first column (account name)
+                    col_value = col.get('value', '').strip()
+                    if col_value and not col_value.replace(',', '').replace('$', '').replace('-', '').strip().isdigit():
+                        # This might be the customer name (not a number)
+                        # Check if it looks like a customer/project name
+                        if any(indicator in col_value.lower() for indicator in ['a6', 'tws', 'cdsp', 'perigean', 'dmva']):
+                            customer_name = col_value
+                            break
+                
+                # If no customer name found, check if there's a customer column in the row
+                if not customer_name:
+                    # Check for customer reference in the row structure
+                    customer_ref = row.get('CustomerRef', {})
+                    if customer_ref:
+                        customer_name = customer_ref.get('name', '')
+                
+                # Check ClassRef - if it belongs to GA (8005), skip this row
+                class_ref = row.get('ClassRef', {})
+                if class_ref and self._classref_belongs_to_ga(class_ref):
+                    logger.debug(f"  ⚠️ Skipping P&L Detail row - ClassRef belongs to GA (8005): {class_ref.get('name', 'N/A')}")
+                    return
+                
+                # Determine transaction type from row data
+                # Bills map to 5011 (Direct Labor), other transactions map to 5001 (Billable Salaries)
+                transaction_type = row.get('TransactionType', '')
+                if transaction_type == 'Bill':
+                    # Bills are Direct Labor (5011)
+                    target_account = '5011'
+                    account_full_name = "5011 COGS:Direct 1099 Labor"
+                else:
+                    # Other transactions (Journal Entry, etc.) are Billable Salaries (5001)
+                    target_account = '5001'
+                    if account_num == '5001' and 'salaries' in account_name.lower():
+                        account_full_name = "Billable Salaries and Wages"
+                    else:
+                        account_full_name = account_name
+                
+                # Only process if this matches the target account
+                if account_num != target_account:
+                    return
+                
+                # Use customer name as project name (group same customer names together)
+                if not customer_name:
+                    logger.debug(f"  ⚠️ No customer name found for {account_name} (Amount: ${amount:,.2f})")
+                    return
+                
+                project_name = customer_name
+                
+                # Add to result
+                if account_full_name not in expense_by_project:
+                    expense_by_project[account_full_name] = {}
+                
+                if project_name not in expense_by_project[account_full_name]:
+                    expense_by_project[account_full_name][project_name] = 0.0
+                
+                # Use absolute value (expenses can be negative)
+                expense_by_project[account_full_name][project_name] += abs(amount)
+                
+                logger.info(f"  📊 {account_full_name} → {project_name}: ${abs(amount):,.2f} ({transaction_type or 'Transaction'})")
+        
+        except Exception as e:
+            logger.error(f"Error parsing P&L Detail row: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
     
     def _process_expense_transaction(
         self,
@@ -798,12 +871,27 @@ class QBODataFetcher:
                 account_name = account_ref.get('name', '')
                 account_id = account_ref.get('value', '')
                 
+                # Check ClassRef first - if it belongs to GA (8005), skip this transaction
+                class_ref = line_detail.get('ClassRef', {})
+                if class_ref and self._classref_belongs_to_ga(class_ref):
+                    logger.debug(f"  ⚠️ Skipping {transaction_type} transaction - ClassRef belongs to GA (8005): {class_ref.get('name', 'N/A')}")
+                    continue
+                
                 # Extract account number from account name (e.g., "5001 Salaries & wages" -> "5001")
                 account_num = None
                 if account_name:
                     account_match = re.match(r'^(\d{4})', account_name)
                     if account_match:
                         account_num = account_match.group(1)
+                
+                # For Bills: they should map to 5011 (Direct Labor)
+                # For other transactions: they should map to 5001 (Billable Salaries)
+                if transaction_type == 'Bill':
+                    # Bills are Direct Labor (5011)
+                    target_account = '5011'
+                else:
+                    # Other transactions (Purchase, etc.) are Billable Salaries (5001)
+                    target_account = '5001'
                 
                 # Skip if not a target account
                 if not account_num or account_num not in account_numbers:
@@ -814,7 +902,8 @@ class QBODataFetcher:
                 if amount == 0:
                     continue
                 
-                # Extract project name from CustomerRef or ClassRef
+                # Extract project name from CustomerRef (Customer column)
+                # This is the primary source for project assignment
                 project_name = None
                 
                 # Priority 1: Line-level CustomerRef (if present)
@@ -822,28 +911,15 @@ class QBODataFetcher:
                 if line_customer_ref:
                     customer_name = line_customer_ref.get('name', '')
                     if customer_name:
-                        project_name = self._extract_project_name(customer_name)
-                        if project_name:
-                            logger.info(f"  ✓ Extracted project from line CustomerRef: '{project_name}'")
+                        # Use customer name directly (group same customer names together)
+                        project_name = customer_name
+                        logger.info(f"  ✓ Extracted project from line CustomerRef: '{project_name}'")
                 
                 # Priority 2: Transaction-level CustomerRef
                 if not project_name and transaction_customer_name:
-                    project_name = self._extract_project_name(transaction_customer_name)
-                    if project_name:
-                        logger.info(f"  ✓ Extracted project from transaction CustomerRef: '{project_name}'")
-                
-                # Priority 3: ClassRef (may contain project info)
-                if not project_name:
-                    class_ref = line_detail.get('ClassRef', {})
-                    if class_ref:
-                        class_name = class_ref.get('name', '')
-                        if class_name:
-                            # Check if class name looks like a project (has project indicators)
-                            project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
-                            if any(indicator in class_name.lower() for indicator in project_indicators):
-                                project_name = self._extract_project_name(class_name)
-                                if project_name:
-                                    logger.info(f"  ✓ Extracted project from ClassRef: '{project_name}'")
+                    # Use customer name directly (group same customer names together)
+                    project_name = transaction_customer_name
+                    logger.info(f"  ✓ Extracted project from transaction CustomerRef: '{project_name}'")
                 
                 # Skip if no project name found
                 if not project_name:
@@ -851,11 +927,13 @@ class QBODataFetcher:
                     continue
                 
                 # Map account number to account name (handle renamed accounts)
-                account_full_name = account_name
-                if account_num == '5001' and 'salaries' in account_name.lower():
+                # Bills map to 5011 (Direct Labor), Journal Entries map to 5001 (Billable Salaries)
+                if transaction_type == 'Bill':
+                    account_full_name = "5011 COGS:Direct 1099 Labor"  # Direct Labor
+                elif account_num == '5001' and 'salaries' in account_name.lower():
                     account_full_name = "Billable Salaries and Wages"
-                elif account_num == '5011':
-                    account_full_name = account_name  # Keep original name for 5011
+                else:
+                    account_full_name = account_name
                 
                 # Add to result
                 if account_full_name not in expense_by_project:
@@ -905,6 +983,12 @@ class QBODataFetcher:
                 if not journal_detail:
                     continue
                 
+                # Check ClassRef first - if it belongs to GA (8005), skip this line
+                class_ref = journal_detail.get('ClassRef', {})
+                if class_ref and self._classref_belongs_to_ga(class_ref):
+                    logger.debug(f"  ⚠️ Skipping JournalEntry line - ClassRef belongs to GA (8005): {class_ref.get('name', 'N/A')}")
+                    continue
+                
                 # Get account reference
                 account_ref = journal_detail.get('AccountRef', {})
                 account_name = account_ref.get('name', '')
@@ -944,6 +1028,11 @@ class QBODataFetcher:
                         elif 'direct' in account_name_lower and '1099' in account_name_lower and 'labor' in account_name_lower:
                             account_num = '5011'
                             logger.info(f"  🔍 JournalEntry: Matched account 5011 by name pattern: '{account_name}'")
+                
+                # Journal Entries should map to 5001 (Billable Salaries)
+                # Only process if it's account 5001
+                if account_num != '5001':
+                    continue
                 
                 # Skip if not a target account
                 if not account_num or account_num not in account_numbers:
@@ -1132,6 +1221,45 @@ class QBODataFetcher:
             logger.error(f"Error processing JournalEntry transaction: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def _classref_belongs_to_ga(self, class_ref: Dict) -> bool:
+        """
+        Check if a ClassRef belongs to 8005 (GA) or should funnel to COGS
+        
+        Based on the QBO Classes mapping:
+        - 8005 Salaries and Wages (GA) belongs to GA
+        - All other ClassRefs (01-06, 11-17) should funnel to COGS
+        
+        Args:
+            class_ref: ClassRef dictionary from transaction
+            
+        Returns:
+            True if ClassRef belongs to 8005 (GA), False if it should go to COGS
+        """
+        if not class_ref:
+            return False
+        
+        class_name = class_ref.get('name', '').lower()
+        if not class_name:
+            return False
+        
+        # Check if this is specifically the 8005 GA class
+        # Look for patterns like "8005", "salaries and wages (ga)", "ga", etc.
+        ga_indicators = [
+            '8005',
+            'salaries and wages (ga)',
+            'salaries & wages (ga)',
+            'general & administrative',
+            'general and administrative',
+            'g&a'
+        ]
+        
+        # Check if class name contains GA indicators
+        if any(indicator in class_name for indicator in ga_indicators):
+            return True
+        
+        # All other ClassRefs (01-06, 11-17) should funnel to COGS
+        return False
     
     def _extract_project_name(self, name: str) -> Optional[str]:
         """
