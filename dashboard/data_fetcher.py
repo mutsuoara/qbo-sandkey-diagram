@@ -873,6 +873,9 @@ class QBODataFetcher:
                 if not account_num or account_num not in account_numbers:
                     continue
                 
+                # Log that we found a target account line
+                logger.info(f"  🔍 Found target account in JournalEntry: {account_name} (Account #: {account_num})")
+                
                 # Get amount and posting type
                 amount = float(line.get('Amount', 0))
                 posting_type = journal_detail.get('PostingType', '')
@@ -881,13 +884,17 @@ class QBODataFetcher:
                 # We want the absolute value of expenses
                 if posting_type == 'Debit' and account_num in account_numbers:
                     expense_amount = abs(amount)
+                    logger.info(f"  🔍 JournalEntry: {account_name} - Debit ${expense_amount:,.2f}")
                 elif posting_type == 'Credit':
                     # Credits decrease expenses (negative), so we skip or treat as negative
+                    logger.info(f"  🔍 JournalEntry: {account_name} - Credit ${abs(amount):,.2f} (skipping)")
                     continue
                 else:
+                    logger.info(f"  🔍 JournalEntry: {account_name} - Unknown posting type: {posting_type}")
                     continue
                 
                 if expense_amount == 0:
+                    logger.info(f"  🔍 JournalEntry: {account_name} - Zero amount, skipping")
                     continue
                 
                 # Extract project name from EntityRef or Description
@@ -899,14 +906,18 @@ class QBODataFetcher:
                 if entity_ref:
                     entity_name = entity_ref.get('name', '')
                     if entity_name:
+                        logger.info(f"  🔍 JournalEntry: Found EntityRef name: '{entity_name}'")
                         project_name = self._extract_project_name(entity_name)
                         if project_name:
                             logger.info(f"  ✓ Extracted project from JournalEntry EntityRef: '{project_name}'")
+                        else:
+                            logger.info(f"  ⚠️ EntityRef name '{entity_name}' doesn't match project criteria")
                 
                 # Priority 2: Description (search for project keywords)
                 if not project_name:
                     description = journal_detail.get('Description', '')
                     if description:
+                        logger.info(f"  🔍 JournalEntry: Checking Description: '{description[:100]}...'")
                         # Search for project keywords in description
                         project_keywords = [
                             'A6 Enterprise Services', 'A6 Surge Support', 'A6 DHO',
@@ -919,10 +930,12 @@ class QBODataFetcher:
                                 project_name = keyword
                                 logger.info(f"  ✓ Extracted project from JournalEntry Description: '{project_name}'")
                                 break
+                    else:
+                        logger.info(f"  🔍 JournalEntry: No Description found")
                 
                 # Skip if no project name found
                 if not project_name:
-                    logger.debug(f"  ⚠️ No project name found for JournalEntry (Account: {account_name}, Amount: ${expense_amount:,.2f})")
+                    logger.info(f"  ⚠️ No project name found for JournalEntry (Account: {account_name}, Amount: ${expense_amount:,.2f}, PostingType: {posting_type})")
                     continue
                 
                 # Map account number to account name (handle renamed accounts)
