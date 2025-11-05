@@ -866,12 +866,30 @@ class QBODataFetcher:
                 if account_name and ('500' in account_name or 'salar' in account_name.lower() or 'wage' in account_name.lower()):
                     logger.info(f"  🔍 JournalEntry: Found account '{account_name}' (checking if target...)")
                 
-                # Extract account number from account name (e.g., "5001 Salaries & wages" -> "5001")
+                # Extract account number from account name
+                # Account names can be in different formats:
+                # - "5001 Salaries & wages" (starts with number)
+                # - "COGS:Salaries & wages" (has prefix, need to match by name)
+                # - "5011 Direct 1099 Labor" (starts with number)
                 account_num = None
                 if account_name:
-                    account_match = re.match(r'^(\d{4})', account_name)
+                    # Try to extract 4-digit account number from anywhere in the name
+                    account_match = re.search(r'(\d{4})', account_name)
                     if account_match:
                         account_num = account_match.group(1)
+                    else:
+                        # If no number found, try to match by account name patterns
+                        account_name_lower = account_name.lower()
+                        # Match account 5001 by name patterns
+                        if 'salaries' in account_name_lower and 'wage' in account_name_lower:
+                            # Check if it's in COGS (not G&A)
+                            if 'cogs' in account_name_lower or 'cost of goods' in account_name_lower:
+                                account_num = '5001'
+                                logger.info(f"  🔍 JournalEntry: Matched account 5001 by name pattern: '{account_name}'")
+                        # Match account 5011 by name patterns
+                        elif 'direct' in account_name_lower and '1099' in account_name_lower and 'labor' in account_name_lower:
+                            account_num = '5011'
+                            logger.info(f"  🔍 JournalEntry: Matched account 5011 by name pattern: '{account_name}'")
                 
                 # Skip if not a target account
                 if not account_num or account_num not in account_numbers:
