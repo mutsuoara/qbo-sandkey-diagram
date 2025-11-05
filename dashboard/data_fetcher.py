@@ -661,6 +661,25 @@ class QBODataFetcher:
                 purchases = purchase_data['QueryResponse'].get('Purchase', [])
                 logger.info(f"Found {len(purchases)} Purchase transactions")
             
+            # Query Journal Entry transactions (for payroll/account 5001)
+            logger.info("Querying JournalEntry transactions...")
+            journal_query = (
+                f"SELECT * FROM JournalEntry "
+                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
+                f"MAXRESULTS 1000"
+            )
+            
+            params = {
+                'query': journal_query,
+                'minorversion': '65'
+            }
+            
+            journal_data = self._make_request('query', params)
+            journal_entries = []
+            if journal_data and 'QueryResponse' in journal_data:
+                journal_entries = journal_data['QueryResponse'].get('JournalEntry', [])
+                logger.info(f"Found {len(journal_entries)} JournalEntry transactions")
+            
             # Process Bill transactions
             for bill in bills:
                 self._process_expense_transaction(bill, 'Bill', account_numbers, expense_by_project)
@@ -668,6 +687,10 @@ class QBODataFetcher:
             # Process Purchase transactions
             for purchase in purchases:
                 self._process_expense_transaction(purchase, 'Purchase', account_numbers, expense_by_project)
+            
+            # Process Journal Entry transactions
+            for journal_entry in journal_entries:
+                self._process_journal_entry_expense(journal_entry, account_numbers, expense_by_project)
             
             # Log summary
             logger.info("="*80)
@@ -807,6 +830,121 @@ class QBODataFetcher:
         
         except Exception as e:
             logger.error(f"Error processing {transaction_type} transaction: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    def _process_journal_entry_expense(
+        self,
+        journal_entry: Dict,
+        account_numbers: List[str],
+        expense_by_project: Dict[str, Dict[str, float]]
+    ):
+        """
+        Process a Journal Entry transaction to extract expenses by project
+        
+        Args:
+            journal_entry: JournalEntry transaction object
+            account_numbers: List of account numbers to filter (e.g., ['5001', '5011'])
+            expense_by_project: Dictionary to accumulate results
+        """
+        try:
+            # Process Line items
+            lines = journal_entry.get('Line', [])
+            if not lines:
+                return
+            
+            for line in lines:
+                journal_detail = line.get('JournalEntryLineDetail', {})
+                if not journal_detail:
+                    continue
+                
+                # Get account reference
+                account_ref = journal_detail.get('AccountRef', {})
+                account_name = account_ref.get('name', '')
+                
+                # Extract account number from account name (e.g., "5001 Salaries & wages" -> "5001")
+                account_num = None
+                if account_name:
+                    account_match = re.match(r'^(\d{4})', account_name)
+                    if account_match:
+                        account_num = account_match.group(1)
+                
+                # Skip if not a target account
+                if not account_num or account_num not in account_numbers:
+                    continue
+                
+                # Get amount and posting type
+                amount = float(line.get('Amount', 0))
+                posting_type = journal_detail.get('PostingType', '')
+                
+                # For expense accounts, debits increase expenses
+                # We want the absolute value of expenses
+                if posting_type == 'Debit' and account_num in account_numbers:
+                    expense_amount = abs(amount)
+                elif posting_type == 'Credit':
+                    # Credits decrease expenses (negative), so we skip or treat as negative
+                    continue
+                else:
+                    continue
+                
+                if expense_amount == 0:
+                    continue
+                
+                # Extract project name from EntityRef or Description
+                project_name = None
+                
+                # Priority 1: EntityRef (if present)
+                entity = line.get('Entity', {})
+                entity_ref = entity.get('EntityRef', {})
+                if entity_ref:
+                    entity_name = entity_ref.get('name', '')
+                    if entity_name:
+                        project_name = self._extract_project_name(entity_name)
+                        if project_name:
+                            logger.info(f"  ✓ Extracted project from JournalEntry EntityRef: '{project_name}'")
+                
+                # Priority 2: Description (search for project keywords)
+                if not project_name:
+                    description = journal_detail.get('Description', '')
+                    if description:
+                        # Search for project keywords in description
+                        project_keywords = [
+                            'A6 Enterprise Services', 'A6 Surge Support', 'A6 DHO',
+                            'A6 Financial Management', 'A6 CIE', 'A6 Cross Benefits',
+                            'A6 CHAMPVA', 'A6 Toxic Exposure', 'A6 VA Form Engine',
+                            'CDSP', 'TWS FLRA', 'Perigean', 'DMVA'
+                        ]
+                        for keyword in project_keywords:
+                            if keyword.lower() in description.lower():
+                                project_name = keyword
+                                logger.info(f"  ✓ Extracted project from JournalEntry Description: '{project_name}'")
+                                break
+                
+                # Skip if no project name found
+                if not project_name:
+                    logger.debug(f"  ⚠️ No project name found for JournalEntry (Account: {account_name}, Amount: ${expense_amount:,.2f})")
+                    continue
+                
+                # Map account number to account name (handle renamed accounts)
+                account_full_name = account_name
+                if account_num == '5001' and 'salaries' in account_name.lower():
+                    account_full_name = "Billable Salaries and Wages"
+                elif account_num == '5011':
+                    account_full_name = account_name  # Keep original name for 5011
+                
+                # Add to result
+                if account_full_name not in expense_by_project:
+                    expense_by_project[account_full_name] = {}
+                
+                if project_name not in expense_by_project[account_full_name]:
+                    expense_by_project[account_full_name][project_name] = 0.0
+                
+                expense_by_project[account_full_name][project_name] += expense_amount
+                
+                logger.info(f"  📊 {account_full_name} → {project_name}: ${expense_amount:,.2f} (JournalEntry)")
+        
+        except Exception as e:
+            logger.error(f"Error processing JournalEntry transaction: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
     
