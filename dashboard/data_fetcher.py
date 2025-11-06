@@ -696,8 +696,9 @@ class QBODataFetcher:
                                             logger.info(f"First deeper nested row ColData: {[col.get('value', '')[:50] for col in deeper_cols[:5]]}")
             
             # Process each row to find expenses for target accounts
+            # Pass None as initial parent_customer_name (will be extracted from Section headers)
             for row in row_list:
-                self._parse_pl_detail_row(row, account_numbers, expense_by_project)
+                self._parse_pl_detail_row(row, account_numbers, expense_by_project, None)
             
             # Log summary
             logger.info("="*80)
@@ -722,35 +723,52 @@ class QBODataFetcher:
         self,
         row: Dict,
         account_numbers: List[str],
-        expense_by_project: Dict[str, Dict[str, float]]
+        expense_by_project: Dict[str, Dict[str, float]],
+        parent_customer_name: str = None
     ):
         """
         Parse a row from ProfitAndLossDetail report to extract expenses by project
         
         When columns=customer, the report structure shows:
-        - Account name in ColData[0]
-        - Customer/project name in ColData (customer column)
-        - Amount in ColData (amount column)
-        - Transaction type (Bill, Journal Entry, etc.)
-        - ClassRef information
+        - Top-level Section: Income, COGS, Expenses
+        - Nested Section: Customer groups (customer name in Header)
+        - Data rows: Account rows with ColData containing account info and amounts
         
         Args:
             row: Row dictionary from ProfitAndLossDetail report
             account_numbers: List of account numbers to filter (e.g., ['5001', '5011'])
             expense_by_project: Dictionary to accumulate results
+            parent_customer_name: Customer name from parent Section (for tracking)
         """
         try:
             # Handle different row types (Section, Data, Summary)
             row_type = row.get('type', '')
+            
+            # Extract customer name from Section Header if this is a Section
+            current_customer_name = parent_customer_name
+            if row_type == 'Section' and 'Header' in row:
+                header = row.get('Header', {})
+                if 'ColData' in header:
+                    header_cols = header.get('ColData', [])
+                    # Customer name is typically in the first column of Section header
+                    if header_cols and len(header_cols) > 0:
+                        header_value = header_cols[0].get('value', '').strip()
+                        # Check if this looks like a customer/project name (not a section name like "Income", "COGS")
+                        section_keywords = ['income', 'cogs', 'cost of goods sold', 'expenses', 'other income', 'other expenses']
+                        if header_value and not any(keyword in header_value.lower() for keyword in section_keywords):
+                            # This might be a customer name
+                            if any(indicator in header_value.lower() for indicator in ['a6', 'tws', 'cdsp', 'perigean', 'dmva', 'cross benefits']):
+                                current_customer_name = header_value
+                                logger.debug(f"  📍 Found customer name in Section Header: '{current_customer_name}'")
             
             # If this row has nested rows (Sections), process them recursively
             if 'Rows' in row and row.get('Rows'):
                 nested_rows = row['Rows'].get('Row', [])
                 if isinstance(nested_rows, list):
                     for nested_row in nested_rows:
-                        self._parse_pl_detail_row(nested_row, account_numbers, expense_by_project)
+                        self._parse_pl_detail_row(nested_row, account_numbers, expense_by_project, current_customer_name)
                 elif isinstance(nested_rows, dict):
-                    self._parse_pl_detail_row(nested_rows, account_numbers, expense_by_project)
+                    self._parse_pl_detail_row(nested_rows, account_numbers, expense_by_project, current_customer_name)
             
             # For Data rows, extract account and customer information
             if row_type == 'Data' or 'ColData' in row:
@@ -845,6 +863,10 @@ class QBODataFetcher:
                     return
                 
                 # Use customer name as project name (group same customer names together)
+                # If no customer name found in ColData, use parent customer name from Section
+                if not customer_name:
+                    customer_name = parent_customer_name
+                
                 if not customer_name:
                     logger.debug(f"  ⚠️ No customer name found for {account_name} (Amount: ${amount:,.2f})")
                     return
