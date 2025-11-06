@@ -672,8 +672,28 @@ class QBODataFetcher:
                         nested_row_list = nested_rows['Row']
                         logger.info(f"First row has {len(nested_row_list) if isinstance(nested_row_list, list) else 1} nested rows")
                         if isinstance(nested_row_list, list) and len(nested_row_list) > 0:
-                            logger.info(f"First nested row keys: {list(nested_row_list[0].keys())}")
-                            logger.info(f"First nested row type: {nested_row_list[0].get('type', 'N/A')}")
+                            first_nested = nested_row_list[0]
+                            logger.info(f"First nested row keys: {list(first_nested.keys())}")
+                            logger.info(f"First nested row type: {first_nested.get('type', 'N/A')}")
+                            # Check if nested row has a Header (customer name might be in Header)
+                            if 'Header' in first_nested:
+                                header_data = first_nested.get('Header', {})
+                                if 'ColData' in header_data:
+                                    header_cols = header_data.get('ColData', [])
+                                    logger.info(f"First nested row Header ColData: {[col.get('value', '')[:50] for col in header_cols[:3]]}")
+                            # Check if nested row has more nested rows
+                            if 'Rows' in first_nested:
+                                deeper_rows = first_nested.get('Rows', {})
+                                if isinstance(deeper_rows, dict) and 'Row' in deeper_rows:
+                                    deeper_row_list = deeper_rows['Row']
+                                    logger.info(f"First nested row has {len(deeper_row_list) if isinstance(deeper_row_list, list) else 1} deeper nested rows")
+                                    if isinstance(deeper_row_list, list) and len(deeper_row_list) > 0:
+                                        first_deeper = deeper_row_list[0]
+                                        logger.info(f"First deeper nested row keys: {list(first_deeper.keys())}")
+                                        logger.info(f"First deeper nested row type: {first_deeper.get('type', 'N/A')}")
+                                        if 'ColData' in first_deeper:
+                                            deeper_cols = first_deeper.get('ColData', [])
+                                            logger.info(f"First deeper nested row ColData: {[col.get('value', '')[:50] for col in deeper_cols[:5]]}")
             
             # Process each row to find expenses for target accounts
             for row in row_list:
