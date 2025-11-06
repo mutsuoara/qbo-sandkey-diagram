@@ -828,29 +828,65 @@ class QBODataFetcher:
                 if amount == 0:
                     return
                 
-                # Extract customer/project name from customer column
-                # When columns=customer, the customer name appears in one of the ColData columns
-                # Based on the report structure, we need to find the customer column
-                customer_name = None
+                # Extract customer/project name from ColData
+                # Based on the raw JSON structure:
+                # - ColData[0]: Account name (e.g., "5001 Salaries & wages")
+                # - ColData[1]: Date (e.g., "2025-02-25")
+                # - ColData[2]: Transaction type (e.g., "JournalEntry")
+                # - ColData[3]: Vendor/customer name (often empty or vendor name)
+                # - ColData[4]: Class/department code (e.g., "04 Engineering", "02 Client Services")
+                # - ColData[5]: Description (e.g., "[Rippling] Salary for 2-25-0022 VA CIE...")
+                project_name = None
                 
-                # Check for customer information in ColData
-                # The customer column might be in a different position depending on report structure
-                # Look for customer name in ColData (usually after account name, before amount)
-                for i, col in enumerate(col_data[1:], start=1):  # Skip first column (account name)
-                    col_value = col.get('value', '').strip()
-                    if col_value and not col_value.replace(',', '').replace('$', '').replace('-', '').strip().isdigit():
-                        # This might be the customer name (not a number)
-                        # Check if it looks like a customer/project name
-                        if any(indicator in col_value.lower() for indicator in ['a6', 'tws', 'cdsp', 'perigean', 'dmva']):
-                            customer_name = col_value
-                            break
+                # Priority 1: Check ColData[5] (description) for project names
+                if len(col_data) > 5:
+                    description = col_data[5].get('value', '').strip()
+                    if description:
+                        project_name = self._extract_project_from_description(description)
+                        if project_name:
+                            logger.debug(f"  ✓ Extracted project from description (ColData[5]): '{project_name}'")
                 
-                # If no customer name found, check if there's a customer column in the row
-                if not customer_name:
-                    # Check for customer reference in the row structure
+                # Priority 2: Check ColData[4] (class code) - but skip if it's just a department code
+                if not project_name and len(col_data) > 4:
+                    class_code = col_data[4].get('value', '').strip()
+                    if class_code:
+                        # Try to normalize it (will skip if it's just a department code)
+                        normalized = self._normalize_project_name(class_code)
+                        if normalized:
+                            project_name = normalized
+                            logger.debug(f"  ✓ Extracted project from class code (ColData[4]): '{project_name}'")
+                
+                # Priority 3: Check ColData[3] (vendor/customer name) - but only if it looks like a project
+                if not project_name and len(col_data) > 3:
+                    vendor_name = col_data[3].get('value', '').strip()
+                    if vendor_name:
+                        normalized = self._normalize_project_name(vendor_name)
+                        if normalized:
+                            project_name = normalized
+                            logger.debug(f"  ✓ Extracted project from vendor name (ColData[3]): '{project_name}'")
+                
+                # Priority 4: Check other ColData columns for project indicators
+                if not project_name:
+                    for i, col in enumerate(col_data[1:], start=1):  # Skip first column (account name)
+                        col_value = col.get('value', '').strip()
+                        if col_value and not col_value.replace(',', '').replace('$', '').replace('-', '').strip().isdigit():
+                            # This might be a project name (not a number)
+                            normalized = self._normalize_project_name(col_value)
+                            if normalized:
+                                project_name = normalized
+                                logger.debug(f"  ✓ Extracted project from ColData[{i}]: '{project_name}'")
+                                break
+                
+                # Priority 5: Check for customer reference in the row structure
+                if not project_name:
                     customer_ref = row.get('CustomerRef', {})
                     if customer_ref:
                         customer_name = customer_ref.get('name', '')
+                        if customer_name:
+                            normalized = self._normalize_project_name(customer_name)
+                            if normalized:
+                                project_name = normalized
+                                logger.debug(f"  ✓ Extracted project from CustomerRef: '{project_name}'")
                 
                 # Check ClassRef - if it belongs to GA (8005), skip this row
                 class_ref = row.get('ClassRef', {})
@@ -877,16 +913,18 @@ class QBODataFetcher:
                 if account_num != target_account:
                     return
                 
-                # Use customer name as project name (group same customer names together)
-                # If no customer name found in ColData, use parent customer name from Section
-                if not customer_name:
-                    customer_name = parent_customer_name
+                # If no project name found, try using parent customer name from Section
+                if not project_name:
+                    if parent_customer_name:
+                        normalized = self._normalize_project_name(parent_customer_name)
+                        if normalized:
+                            project_name = normalized
+                            logger.debug(f"  ✓ Extracted project from parent customer name: '{project_name}'")
                 
-                if not customer_name:
-                    logger.debug(f"  ⚠️ No customer name found for {account_name} (Amount: ${amount:,.2f})")
-                    return
-                
-                project_name = customer_name
+                # If still no project name found, categorize as "Unallocated"
+                if not project_name:
+                    project_name = "Unallocated"
+                    logger.debug(f"  ⚠️ No project name found for {account_name} (Amount: ${amount:,.2f}) - Categorizing as 'Unallocated'")
                 
                 # Add to result
                 if account_full_name not in expense_by_project:
@@ -1376,6 +1414,99 @@ class QBODataFetcher:
             return None
         
         return name
+    
+    def _extract_project_from_description(self, description: str) -> Optional[str]:
+        """
+        Extract and normalize project name from transaction description
+        
+        Args:
+            description: Transaction description (e.g., "[Rippling] Salary for 2-25-0022 VA CIE...")
+        
+        Returns:
+            Normalized project name, or None if not found
+        """
+        if not description:
+            return None
+        
+        description_lower = description.lower()
+        
+        # Map description keywords to standard project names
+        # This mapping should match the project names used on the income side
+        project_keyword_mapping = {
+            # A6 projects
+            'a6 enterprise services': 'A6 Enterprise Services',
+            'agile six enterprise services': 'A6 Enterprise Services',
+            'a6 surge support': 'A6 Surge Support',
+            'a6 dho': 'A6 DHO',
+            'a6 financial management': 'A6 Financial Management',
+            'a6 cie': 'A6 CIE',
+            'va cie': 'A6 CIE',
+            'a6 cross benefits': 'A6 Cross Benefits',
+            'cross benefits': 'A6 Cross Benefits',
+            'a6 champva': 'A6 CHAMPVA',
+            'champva': 'A6 CHAMPVA',
+            'a6 toxic exposure': 'A6 Toxic Exposure',
+            'a6 va form engine': 'A6 VA Form Engine',
+            # Other projects
+            'tws flra': 'TWS FLRA',
+            'cdsp': 'CDSP',
+            'perigean': 'Perigean',
+            'dmva': 'DMVA',
+        }
+        
+        # Search for project keywords in description
+        for keyword, project_name in project_keyword_mapping.items():
+            if keyword in description_lower:
+                logger.debug(f"  ✓ Extracted project '{project_name}' from description keyword '{keyword}'")
+                return project_name
+        
+        # Also check for project codes in format like "2-25-0022 VA CIE"
+        # Extract project code pattern (e.g., "VA CIE" from "2-25-0022 VA CIE")
+        project_code_pattern = r'\b([A-Z]{2,}\s+[A-Z]{2,})\b'
+        matches = re.findall(project_code_pattern, description.upper())
+        for match in matches:
+            # Map project codes to standard names
+            code_mapping = {
+                'VA CIE': 'A6 CIE',
+                'VA CHAMPVA': 'A6 CHAMPVA',
+            }
+            if match in code_mapping:
+                logger.debug(f"  ✓ Extracted project '{code_mapping[match]}' from description code '{match}'")
+                return code_mapping[match]
+        
+        return None
+    
+    def _normalize_project_name(self, project_name: str) -> Optional[str]:
+        """
+        Normalize project name to match income-side project names
+        
+        Args:
+            project_name: Raw project name from expense data
+        
+        Returns:
+            Normalized project name, or None if not a valid project
+        """
+        if not project_name:
+            return None
+        
+        # First, try direct extraction from name
+        normalized = self._extract_project_name(project_name)
+        if normalized:
+            return normalized
+        
+        # If that fails, try extracting from description
+        normalized = self._extract_project_from_description(project_name)
+        if normalized:
+            return normalized
+        
+        # Check if it's a class code (e.g., "04 Engineering", "02 Client Services")
+        # These are department codes, not project names - skip them
+        class_code_pattern = r'^\d{2}\s+[A-Z]'
+        if re.match(class_code_pattern, project_name):
+            logger.debug(f"  ⚠️ Skipping class code (not a project name): '{project_name}'")
+            return None
+        
+        return None
     
     def get_balance_sheet(self, start_date: str = None, end_date: str = None) -> Optional[Dict]:
         """
