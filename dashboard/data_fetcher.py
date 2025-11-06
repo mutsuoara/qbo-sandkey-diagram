@@ -675,12 +675,21 @@ class QBODataFetcher:
                             first_nested = nested_row_list[0]
                             logger.info(f"First nested row keys: {list(first_nested.keys())}")
                             logger.info(f"First nested row type: {first_nested.get('type', 'N/A')}")
-                            # Check if nested row has a Header (customer name might be in Header)
+                            
+                            # Check ALL possible locations for customer name
+                            # 1. Header (if exists)
                             if 'Header' in first_nested:
                                 header_data = first_nested.get('Header', {})
                                 if 'ColData' in header_data:
                                     header_cols = header_data.get('ColData', [])
                                     logger.info(f"First nested row Header ColData: {[col.get('value', '')[:50] for col in header_cols[:3]]}")
+                            # 2. Summary (customer name might be in Summary)
+                            if 'Summary' in first_nested:
+                                summary_data = first_nested.get('Summary', {})
+                                if isinstance(summary_data, dict) and 'ColData' in summary_data:
+                                    summary_cols = summary_data.get('ColData', [])
+                                    logger.info(f"First nested row Summary ColData: {[col.get('value', '')[:50] for col in summary_cols[:3]]}")
+                            
                             # Check if nested row has more nested rows
                             if 'Rows' in first_nested:
                                 deeper_rows = first_nested.get('Rows', {})
@@ -694,6 +703,12 @@ class QBODataFetcher:
                                         if 'ColData' in first_deeper:
                                             deeper_cols = first_deeper.get('ColData', [])
                                             logger.info(f"First deeper nested row ColData: {[col.get('value', '')[:50] for col in deeper_cols[:5]]}")
+                                        # Check if deeper nested row has Header
+                                        if 'Header' in first_deeper:
+                                            deeper_header = first_deeper.get('Header', {})
+                                            if 'ColData' in deeper_header:
+                                                deeper_header_cols = deeper_header.get('ColData', [])
+                                                logger.info(f"First deeper nested row Header ColData: {[col.get('value', '')[:50] for col in deeper_header_cols[:3]]}")
             
             # Process each row to find expenses for target accounts
             # Pass None as initial parent_customer_name (will be extracted from Section headers)
