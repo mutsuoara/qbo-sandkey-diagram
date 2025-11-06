@@ -799,14 +799,20 @@ class QBODataFetcher:
                 # Extract account name from first column
                 account_name = col_data[0].get('value', '').strip()
                 if not account_name:
+                    logger.debug(f"  ⚠️ Skipping row - no account name in ColData[0]")
                     return
                 
                 # Extract account number from account name
                 account_match = re.match(r'^(\d{4})', account_name)
                 if not account_match:
+                    logger.debug(f"  ⚠️ Skipping row - no account number found in '{account_name}'")
                     return
                 
                 account_num = account_match.group(1)
+                
+                # Log for target accounts
+                if account_num in account_numbers:
+                    logger.info(f"  🔍 Processing row for account {account_num}: {account_name}")
                 
                 # Skip if not a target account
                 if account_num not in account_numbers:
@@ -826,7 +832,10 @@ class QBODataFetcher:
                             continue
                 
                 if amount == 0:
+                    logger.debug(f"  ⚠️ Skipping row - zero amount for {account_name}")
                     return
+                
+                logger.info(f"  💰 Found {account_name}: ${amount:,.2f}")
                 
                 # Extract customer/project name from ColData
                 # Based on the raw JSON structure:
@@ -911,7 +920,10 @@ class QBODataFetcher:
                 
                 # Only process if this matches the target account
                 if account_num != target_account:
+                    logger.info(f"  ⚠️ Skipping row - account {account_num} != target {target_account} (transaction_type: {transaction_type})")
                     return
+                
+                logger.info(f"  ✓ Matched account {account_num} to target {target_account} ({transaction_type})")
                 
                 # If no project name found, try using parent customer name from Section
                 if not project_name:
@@ -936,7 +948,7 @@ class QBODataFetcher:
                 # Use absolute value (expenses can be negative)
                 expense_by_project[account_full_name][project_name] += abs(amount)
                 
-                logger.info(f"  📊 {account_full_name} → {project_name}: ${abs(amount):,.2f} ({transaction_type or 'Transaction'})")
+                logger.info(f"  ✅ SUCCESS: {account_full_name} → {project_name}: ${abs(amount):,.2f} ({transaction_type or 'Transaction'})")
         
         except Exception as e:
             logger.error(f"Error parsing P&L Detail row: {e}")
