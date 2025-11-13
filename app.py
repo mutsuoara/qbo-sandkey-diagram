@@ -1107,6 +1107,79 @@ def test_expenses_by_project():
             "traceback": traceback.format_exc()
         })
 
+@app.server.route('/test/journal-entries-cogs')
+def test_journal_entries_cogs():
+    """Test endpoint for _get_journal_entries_for_cogs() method"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime, timedelta
+    from flask import jsonify
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        if not tokens:
+            return jsonify({"error": "No tokens found - please authenticate with QuickBooks first"})
+        
+        environment = credentials.get('environment', 'sandbox')
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=environment
+        )
+        
+        # Get last 90 days
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=90)
+        
+        # Test the method
+        cogs_data = data_fetcher._get_journal_entries_for_cogs(
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d'),
+            ['5001', '5011']
+        )
+        
+        # Calculate summary statistics
+        summary = {}
+        total_amount = 0.0
+        for account_num, projects in cogs_data.items():
+            account_total = sum(projects.values())
+            total_amount += account_total
+            summary[account_num] = {
+                "project_count": len(projects),
+                "total_amount": account_total,
+                "projects": projects
+            }
+        
+        return jsonify({
+            "success": True,
+            "date_range": {
+                "start": start_date.strftime('%Y-%m-%d'),
+                "end": end_date.strftime('%Y-%m-%d')
+            },
+            "cogs_breakdown": cogs_data,
+            "summary": summary,
+            "accounts_found": list(cogs_data.keys()),
+            "total_projects": sum(len(projects) for projects in cogs_data.values()),
+            "total_amount": total_amount,
+            "test_notes": {
+                "method": "_get_journal_entries_for_cogs()",
+                "accounts_tested": ["5001", "5011"],
+                "expected_structure": "Dict[str, Dict[str, float]] where first key is account number, second key is project name"
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in journal entries COGS test endpoint: {e}")
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
+
 @app.server.route('/test/journal-entries-sample')
 def test_journal_entries_sample():
     """Test endpoint to pull the first 10 journal entries with all available fields"""

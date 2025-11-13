@@ -585,11 +585,9 @@ class QBODataFetcher:
         """
         Get expenses for specific accounts broken down by project/customer
         
-        Uses ProfitAndLossDetail report with columns=customer to get transaction-level
-        expense data grouped by customer/project. This matches the "Profit and Loss by Customer"
-        report in QuickBooks.
-        
-        Reference: https://developer.intuit.com/app/developer/qbo/docs/api/accounting/report-entities/profitandlossdetail
+        Uses transaction-level queries (Journal Entries, Bills, Expenses) to get
+        COGS project breakdown. This is more reliable than ProfitAndLossDetail reports
+        as it directly accesses Entity/CustomerRef fields with project information.
         
         Args:
             account_numbers: List of account numbers to query (e.g., ['5001', '5011'])
@@ -599,7 +597,7 @@ class QBODataFetcher:
         Returns:
             Dictionary mapping account names to project breakdowns:
             {
-                '5001 Salaries & wages': {
+                '5001 Billable Salaries and Wages': {
                     'A6 Enterprise Services': 150000.00,
                     'A6 Surge Support': 100000.00,
                     ...
@@ -618,106 +616,52 @@ class QBODataFetcher:
                 end_date = datetime.now().strftime('%Y-%m-%d')
             
             logger.info("="*80)
-            logger.info(f"FETCHING EXPENSES BY PROJECT (ProfitAndLossDetail Report)")
+            logger.info(f"FETCHING EXPENSES BY PROJECT (Transaction-Level Queries)")
             logger.info(f"Accounts: {account_numbers}")
             logger.info(f"Date range: {start_date} to {end_date}")
             logger.info("="*80)
             
-            # Fetch ProfitAndLossDetail report grouped by customer
-            params = {
-                'start_date': start_date,
-                'end_date': end_date,
-                'columns': 'customer',  # Group by customer/project
-                'minorversion': '65'
-            }
+            # Initialize result structure keyed by account number
+            cogs_data = {}
+            for account_num in account_numbers:
+                cogs_data[account_num] = {}
             
-            logger.info("Fetching ProfitAndLossDetail report with columns=customer...")
-            pl_detail_data = self._make_request('reports/ProfitAndLossDetail', params)
+            # Query 1: Journal Entries (most reliable for COGS allocation)
+            logger.info("Step 1: Querying Journal Entries...")
+            journal_data = self._get_journal_entries_for_cogs(start_date, end_date, account_numbers)
+            self._merge_cogs_data(cogs_data, journal_data)
             
-            if not pl_detail_data:
-                logger.error("No data returned from ProfitAndLossDetail report")
-                return {}
+            # Query 2: Bills with COGS line items
+            logger.info("Step 2: Querying Bills...")
+            bill_data = self._get_bills_for_cogs(start_date, end_date, account_numbers)
+            self._merge_cogs_data(cogs_data, bill_data)
             
-            # Initialize result structure
+            # Query 3: Expense transactions (Checks, Purchases)
+            logger.info("Step 3: Querying Expenses/Purchases...")
+            expense_data = self._get_expenses_for_cogs(start_date, end_date, account_numbers)
+            self._merge_cogs_data(cogs_data, expense_data)
+            
+            # Convert from account number keys to account name keys for compatibility
+            # Map account numbers to account names
             expense_by_project = {}
-            
-            # Parse the report structure
-            # The report has a hierarchical structure with Rows containing Row items
-            # Each row represents an account, and when grouped by customer, it shows customer breakdown
-            rows = pl_detail_data.get('Rows', {})
-            if not rows:
-                logger.warning("No Rows found in ProfitAndLossDetail report")
-                return {}
-            
-            # Extract rows from the structure
-            row_list = rows.get('Row', [])
-            if not row_list:
-                logger.warning("No Row items found in ProfitAndLossDetail report")
-                return {}
-            
-            logger.info(f"Processing {len(row_list)} top-level rows from ProfitAndLossDetail report")
-            
-            # Log structure of first row for debugging
-            if row_list and len(row_list) > 0:
-                first_row = row_list[0]
-                logger.info(f"First row keys: {list(first_row.keys())}")
-                logger.info(f"First row type: {first_row.get('type', 'N/A')}")
-                if 'ColData' in first_row:
-                    logger.info(f"First row ColData length: {len(first_row.get('ColData', []))}")
-                    logger.info(f"First row ColData[0]: {first_row.get('ColData', [{}])[0] if first_row.get('ColData') else 'N/A'}")
-                if 'Rows' in first_row:
-                    nested_rows = first_row.get('Rows', {})
-                    logger.info(f"First row has nested Rows structure: {type(nested_rows)}")
-                    if isinstance(nested_rows, dict) and 'Row' in nested_rows:
-                        nested_row_list = nested_rows['Row']
-                        logger.info(f"First row has {len(nested_row_list) if isinstance(nested_row_list, list) else 1} nested rows")
-                        if isinstance(nested_row_list, list) and len(nested_row_list) > 0:
-                            first_nested = nested_row_list[0]
-                            logger.info(f"First nested row keys: {list(first_nested.keys())}")
-                            logger.info(f"First nested row type: {first_nested.get('type', 'N/A')}")
-                            
-                            # Check ALL possible locations for customer name
-                            # 1. Header (if exists)
-                            if 'Header' in first_nested:
-                                header_data = first_nested.get('Header', {})
-                                if 'ColData' in header_data:
-                                    header_cols = header_data.get('ColData', [])
-                                    logger.info(f"First nested row Header ColData: {[col.get('value', '')[:50] for col in header_cols[:3]]}")
-                            # 2. Summary (customer name might be in Summary)
-                            if 'Summary' in first_nested:
-                                summary_data = first_nested.get('Summary', {})
-                                if isinstance(summary_data, dict) and 'ColData' in summary_data:
-                                    summary_cols = summary_data.get('ColData', [])
-                                    logger.info(f"First nested row Summary ColData: {[col.get('value', '')[:50] for col in summary_cols[:3]]}")
-                            
-                            # Check if nested row has more nested rows
-                            if 'Rows' in first_nested:
-                                deeper_rows = first_nested.get('Rows', {})
-                                if isinstance(deeper_rows, dict) and 'Row' in deeper_rows:
-                                    deeper_row_list = deeper_rows['Row']
-                                    logger.info(f"First nested row has {len(deeper_row_list) if isinstance(deeper_row_list, list) else 1} deeper nested rows")
-                                    if isinstance(deeper_row_list, list) and len(deeper_row_list) > 0:
-                                        first_deeper = deeper_row_list[0]
-                                        logger.info(f"First deeper nested row keys: {list(first_deeper.keys())}")
-                                        logger.info(f"First deeper nested row type: {first_deeper.get('type', 'N/A')}")
-                                        if 'ColData' in first_deeper:
-                                            deeper_cols = first_deeper.get('ColData', [])
-                                            logger.info(f"First deeper nested row ColData: {[col.get('value', '')[:50] for col in deeper_cols[:5]]}")
-                                        # Check if deeper nested row has Header
-                                        if 'Header' in first_deeper:
-                                            deeper_header = first_deeper.get('Header', {})
-                                            if 'ColData' in deeper_header:
-                                                deeper_header_cols = deeper_header.get('ColData', [])
-                                                logger.info(f"First deeper nested row Header ColData: {[col.get('value', '')[:50] for col in deeper_header_cols[:3]]}")
-            
-            # Process each row to find expenses for target accounts
-            # Pass None as initial parent_customer_name (will be extracted from Section headers)
-            for row in row_list:
-                self._parse_pl_detail_row(row, account_numbers, expense_by_project, None)
+            for account_num, projects in cogs_data.items():
+                if not projects:
+                    continue
+                
+                # Map account number to account name
+                if account_num == '5001':
+                    account_name = "Billable Salaries and Wages"
+                elif account_num == '5011':
+                    account_name = "5011 Direct 1099 Labor"
+                else:
+                    # Try to find account name from first transaction (fallback)
+                    account_name = f"{account_num} COGS Account"
+                
+                expense_by_project[account_name] = projects
             
             # Log summary
             logger.info("="*80)
-            logger.info("EXPENSES BY PROJECT SUMMARY:")
+            logger.info("EXPENSES BY PROJECT SUMMARY (All Sources Combined):")
             for account_name, projects in expense_by_project.items():
                 if projects:
                     total = sum(projects.values())
@@ -733,6 +677,671 @@ class QBODataFetcher:
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return {}
+    
+    def _get_journal_entries_for_cogs(
+        self,
+        start_date: str,
+        end_date: str,
+        account_numbers: List[str]
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Query journal entries that allocate COGS to projects
+        
+        Extracts COGS project data from JournalEntry transactions by:
+        1. Querying JournalEntry transactions in date range
+        2. Filtering lines where AccountRef.name starts with account number (5001 or 5011)
+        3. Extracting project from Entity.EntityRef.name (format: "Parent:Project" or just "Project")
+        4. Handling Debit/Credit posting types (Debits increase COGS)
+        5. Aggregating amounts by project
+        
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            account_numbers: List of account numbers to query (e.g., ['5001', '5011'])
+        
+        Returns:
+            Dictionary mapping account numbers to project breakdowns:
+            {
+                '5001': {'A6 Enterprise Services': 45000.00, 'CDSP': 40000.00, ...},
+                '5011': {'A6 Enterprise Services': 15000.00, 'A6 DHO': 12000.00, ...}
+            }
+        """
+        try:
+            logger.info("="*80)
+            logger.info("FETCHING COGS FROM JOURNAL ENTRIES")
+            logger.info(f"Accounts: {account_numbers}")
+            logger.info(f"Date range: {start_date} to {end_date}")
+            logger.info("="*80)
+            
+            # Query JournalEntry transactions
+            query = (
+                f"SELECT * FROM JournalEntry "
+                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
+                f"MAXRESULTS 1000"
+            )
+            
+            params = {'query': query, 'minorversion': '65'}
+            data = self._make_request('query', params)
+            
+            if not data or 'QueryResponse' not in data:
+                logger.warning("No journal entry data returned from query")
+                return {}
+            
+            # Initialize result structure keyed by account number
+            cogs_data = {}
+            for account_num in account_numbers:
+                cogs_data[account_num] = {}
+            
+            entries = data['QueryResponse'].get('JournalEntry', [])
+            logger.info(f"Processing {len(entries)} journal entries for COGS")
+            
+            processed_count = 0
+            skipped_count = 0
+            
+            for entry in entries:
+                entry_number = entry.get('DocNumber', 'N/A')
+                lines = entry.get('Line', [])
+                
+                if not lines:
+                    continue
+                
+                for line in lines:
+                    # Get journal entry line detail
+                    journal_detail = line.get('JournalEntryLineDetail', {})
+                    if not journal_detail:
+                        continue
+                    
+                    # Check ClassRef first - if it belongs to GA (8005), skip this line
+                    class_ref = journal_detail.get('ClassRef', {})
+                    if class_ref and self._classref_belongs_to_ga(class_ref):
+                        logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - ClassRef belongs to GA (8005): {class_ref.get('name', 'N/A')}")
+                        skipped_count += 1
+                        continue
+                    
+                    # Get account reference
+                    account_ref = journal_detail.get('AccountRef', {})
+                    account_name = account_ref.get('name', '')
+                    
+                    if not account_name:
+                        continue
+                    
+                    # Extract account number from account name
+                    # Account names can be: "5001 Billable Salaries and Wages", "COGS:5001 Salaries", etc.
+                    account_num = None
+                    account_match = re.search(r'(\d{4})', account_name)
+                    if account_match:
+                        account_num = account_match.group(1)
+                    else:
+                        # Try to match by name patterns
+                        account_name_lower = account_name.lower()
+                        if 'salaries' in account_name_lower and 'wage' in account_name_lower:
+                            if 'cogs' in account_name_lower or 'cost of goods' in account_name_lower:
+                                account_num = '5001'
+                        elif 'direct' in account_name_lower and '1099' in account_name_lower and 'labor' in account_name_lower:
+                            account_num = '5011'
+                    
+                    # Check if this line is for one of our COGS accounts
+                    if not account_num or account_num not in account_numbers:
+                        continue
+                    
+                    # Get amount and posting type
+                    amount = float(line.get('Amount', 0))
+                    posting_type = journal_detail.get('PostingType', '')
+                    
+                    # Debits increase COGS (expenses), Credits decrease COGS
+                    # We only want Debits for expense accounts
+                    if posting_type != 'Debit':
+                        logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - PostingType is '{posting_type}' (not Debit)")
+                        skipped_count += 1
+                        continue
+                    
+                    if amount == 0:
+                        logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - Zero amount")
+                        skipped_count += 1
+                        continue
+                    
+                    # Check if this is an internal charge (Salary for 9-*)
+                    # These don't belong in COGS accounts 5001/5011, they have their own accounts
+                    line_description = line.get('Description', '')
+                    txn_description = entry.get('PrivateNote', '') or entry.get('Description', '')
+                    combined_description = (line_description + ' ' + txn_description).lower()
+                    
+                    if 'salary for 9-' in combined_description:
+                        logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - Internal charge (Salary for 9-*): {line_description[:100] if line_description else 'N/A'}")
+                        skipped_count += 1
+                        continue
+                    
+                    # Extract project name from Entity
+                    project_name = None
+                    entity = line.get('Entity', {})
+                    entity_ref = entity.get('EntityRef', {})
+                    
+                    if entity_ref:
+                        entity_name = entity_ref.get('name', '')
+                        if entity_name:
+                            # Handle "Parent:Project" format - extract project part
+                            if ':' in entity_name:
+                                # Format: "Agile Six Applications Inc:A6 Enterprise Services"
+                                project_name = entity_name.split(':')[-1].strip()
+                            else:
+                                # Standalone project name
+                                project_name = entity_name.strip()
+                            
+                            # Normalize project name to match income-side names
+                            normalized = self._normalize_project_name(project_name)
+                            if normalized:
+                                project_name = normalized
+                            else:
+                                # If normalization returns None, try extracting from name directly
+                                extracted = self._extract_project_name(project_name)
+                                if extracted:
+                                    project_name = extracted
+                                else:
+                                    # If still no match, use the name as-is (might be a valid project)
+                                    # Only use if it contains project indicators
+                                    project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
+                                    if not any(indicator in project_name.lower() for indicator in project_indicators):
+                                        project_name = None
+                    
+                    # If no project from Entity, try line Description
+                    # (Note: line_description was already extracted above for the 9- check)
+                    if not project_name:
+                        if line_description:
+                            extracted = self._extract_project_from_description(line_description)
+                            if extracted:
+                                project_name = extracted
+                    
+                    # Also try transaction-level description (PrivateNote or Description)
+                    # (Note: txn_description was already extracted above for the 9- check)
+                    if not project_name:
+                        if txn_description:
+                            extracted = self._extract_project_from_description(txn_description)
+                            if extracted:
+                                project_name = extracted
+                    
+                    # If still no project name, categorize as "Unassigned"
+                    if not project_name:
+                        project_name = "Unassigned"
+                        logger.debug(f"  ⚠️ JE #{entry_number}: No project name found for {account_name} (Amount: ${amount:,.2f}) - Categorizing as 'Unassigned'")
+                    
+                    # Add to result
+                    if project_name not in cogs_data[account_num]:
+                        cogs_data[account_num][project_name] = 0.0
+                    
+                    cogs_data[account_num][project_name] += abs(amount)
+                    processed_count += 1
+                    
+                    logger.info(f"  ✅ JE #{entry_number}: {account_num} → {project_name} = ${abs(amount):,.2f}")
+            
+            # Log summary
+            logger.info("="*80)
+            logger.info("JOURNAL ENTRIES COGS SUMMARY:")
+            logger.info(f"  Processed: {processed_count} lines")
+            logger.info(f"  Skipped: {skipped_count} lines")
+            for account_num, projects in cogs_data.items():
+                if projects:
+                    total = sum(projects.values())
+                    logger.info(f"  Account {account_num}: {len(projects)} projects, Total: ${total:,.2f}")
+                    for project_name, project_amount in sorted(projects.items(), key=lambda x: x[1], reverse=True)[:5]:
+                        logger.info(f"    • {project_name}: ${project_amount:,.2f}")
+            logger.info("="*80)
+            
+            return cogs_data
+            
+        except Exception as e:
+            logger.error(f"Error querying journal entries for COGS: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {}
+    
+    def _get_bills_for_cogs(
+        self,
+        start_date: str,
+        end_date: str,
+        account_numbers: List[str]
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Query bills with COGS account line items
+        
+        Extracts COGS project data from Bill transactions by:
+        1. Querying Bill transactions in date range
+        2. Filtering lines where AccountBasedExpenseLineDetail.AccountRef.name starts with account number
+        3. Extracting project from AccountBasedExpenseLineDetail.CustomerRef.name
+        4. Aggregating amounts by project
+        
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            account_numbers: List of account numbers to query (e.g., ['5001', '5011'])
+        
+        Returns:
+            Dictionary mapping account numbers to project breakdowns:
+            {
+                '5001': {'A6 Enterprise Services': 45000.00, 'CDSP': 40000.00, ...},
+                '5011': {'A6 Enterprise Services': 15000.00, 'A6 DHO': 12000.00, ...}
+            }
+        """
+        try:
+            logger.info("="*80)
+            logger.info("FETCHING COGS FROM BILLS")
+            logger.info(f"Accounts: {account_numbers}")
+            logger.info(f"Date range: {start_date} to {end_date}")
+            logger.info("="*80)
+            
+            # Query Bill transactions
+            query = (
+                f"SELECT * FROM Bill "
+                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
+                f"MAXRESULTS 1000"
+            )
+            
+            params = {'query': query, 'minorversion': '65'}
+            data = self._make_request('query', params)
+            
+            if not data or 'QueryResponse' not in data:
+                logger.warning("No bill data returned from query")
+                return {}
+            
+            # Initialize result structure keyed by account number
+            cogs_data = {}
+            for account_num in account_numbers:
+                cogs_data[account_num] = {}
+            
+            bills = data['QueryResponse'].get('Bill', [])
+            logger.info(f"Processing {len(bills)} bills for COGS")
+            
+            processed_count = 0
+            skipped_count = 0
+            
+            for bill in bills:
+                bill_id = bill.get('Id', 'N/A')
+                lines = bill.get('Line', [])
+                
+                if not lines:
+                    continue
+                
+                # Get transaction-level customer reference (fallback)
+                transaction_customer_ref = bill.get('CustomerRef', {})
+                transaction_customer_name = transaction_customer_ref.get('name', '')
+                
+                for line in lines:
+                    # Skip group lines
+                    if line.get('GroupLineDetail'):
+                        continue
+                    
+                    # Get account-based expense line detail
+                    line_detail = (
+                        line.get('AccountBasedExpenseLineDetail') or
+                        line.get('ExpenseLineDetail') or
+                        line.get('ItemBasedExpenseLineDetail')
+                    )
+                    
+                    if not line_detail:
+                        continue
+                    
+                    # Check ClassRef first - if it belongs to GA (8005), skip this line
+                    class_ref = line_detail.get('ClassRef', {})
+                    if class_ref and self._classref_belongs_to_ga(class_ref):
+                        logger.debug(f"  ⚠️ Skipping Bill {bill_id} line - ClassRef belongs to GA (8005): {class_ref.get('name', 'N/A')}")
+                        skipped_count += 1
+                        continue
+                    
+                    # Get account reference
+                    account_ref = line_detail.get('AccountRef', {})
+                    account_name = account_ref.get('name', '')
+                    
+                    if not account_name:
+                        continue
+                    
+                    # Extract account number from account name
+                    account_num = None
+                    account_match = re.search(r'(\d{4})', account_name)
+                    if account_match:
+                        account_num = account_match.group(1)
+                    else:
+                        # Try to match by name patterns
+                        account_name_lower = account_name.lower()
+                        if 'salaries' in account_name_lower and 'wage' in account_name_lower:
+                            if 'cogs' in account_name_lower or 'cost of goods' in account_name_lower:
+                                account_num = '5001'
+                        elif 'direct' in account_name_lower and '1099' in account_name_lower and 'labor' in account_name_lower:
+                            account_num = '5011'
+                    
+                    # Check if this line is for one of our COGS accounts
+                    if not account_num or account_num not in account_numbers:
+                        continue
+                    
+                    # Get amount
+                    amount = float(line.get('Amount', 0))
+                    if amount == 0:
+                        logger.debug(f"  ⚠️ Skipping Bill {bill_id} line - Zero amount")
+                        skipped_count += 1
+                        continue
+                    
+                    # Extract project name from CustomerRef
+                    project_name = None
+                    
+                    # Priority 1: Line-level CustomerRef
+                    line_customer_ref = line_detail.get('CustomerRef', {})
+                    if line_customer_ref:
+                        customer_name = line_customer_ref.get('name', '')
+                        if customer_name:
+                            # Handle "Parent:Project" format
+                            if ':' in customer_name:
+                                project_name = customer_name.split(':')[-1].strip()
+                            else:
+                                project_name = customer_name.strip()
+                            
+                            # Normalize project name
+                            normalized = self._normalize_project_name(project_name)
+                            if normalized:
+                                project_name = normalized
+                            else:
+                                extracted = self._extract_project_name(project_name)
+                                if extracted:
+                                    project_name = extracted
+                    
+                    # Priority 2: Transaction-level CustomerRef
+                    if not project_name and transaction_customer_name:
+                        if ':' in transaction_customer_name:
+                            project_name = transaction_customer_name.split(':')[-1].strip()
+                        else:
+                            project_name = transaction_customer_name.strip()
+                        
+                        normalized = self._normalize_project_name(project_name)
+                        if normalized:
+                            project_name = normalized
+                        else:
+                            extracted = self._extract_project_name(project_name)
+                            if extracted:
+                                project_name = extracted
+                    
+                    # Priority 3: For 5011 items, use VendorRef as fallback
+                    # Note: Only use vendor mapping if the vendor name contains project indicators
+                    # Do not map vendors to projects that belong to 5001 (e.g., A6 Enterprise Services)
+                    if not project_name and account_num == '5011':
+                        vendor_ref = bill.get('VendorRef', {})
+                        vendor_name = vendor_ref.get('name', '') if vendor_ref else ''
+                        
+                        if vendor_name:
+                            # Try to extract project from vendor name if it contains project indicators
+                            # This will only match if the vendor name itself contains project keywords
+                            normalized = self._normalize_project_name(vendor_name)
+                            if normalized:
+                                # Double-check: Don't assign 5001 projects to 5011 items
+                                # A6 Enterprise Services should only appear in 5001
+                                if normalized == 'A6 Enterprise Services':
+                                    logger.debug(f"  ⚠️ Skipping vendor '{vendor_name}' - A6 Enterprise Services belongs to 5001, not 5011")
+                                else:
+                                    project_name = normalized
+                                    logger.info(f"  ✓ Extracted project '{project_name}' from vendor name '{vendor_name}' (5011 item)")
+                    
+                    # If still no project name, categorize as "Unassigned"
+                    if not project_name:
+                        project_name = "Unassigned"
+                        logger.debug(f"  ⚠️ Bill {bill_id}: No project name found for {account_name} (Amount: ${amount:,.2f}) - Categorizing as 'Unassigned'")
+                    
+                    # Add to result
+                    if project_name not in cogs_data[account_num]:
+                        cogs_data[account_num][project_name] = 0.0
+                    
+                    cogs_data[account_num][project_name] += abs(amount)
+                    processed_count += 1
+                    
+                    logger.info(f"  ✅ Bill {bill_id}: {account_num} → {project_name} = ${abs(amount):,.2f}")
+            
+            # Log summary
+            logger.info("="*80)
+            logger.info("BILLS COGS SUMMARY:")
+            logger.info(f"  Processed: {processed_count} lines")
+            logger.info(f"  Skipped: {skipped_count} lines")
+            for account_num, projects in cogs_data.items():
+                if projects:
+                    total = sum(projects.values())
+                    logger.info(f"  Account {account_num}: {len(projects)} projects, Total: ${total:,.2f}")
+                    for project_name, project_amount in sorted(projects.items(), key=lambda x: x[1], reverse=True)[:5]:
+                        logger.info(f"    • {project_name}: ${project_amount:,.2f}")
+            logger.info("="*80)
+            
+            return cogs_data
+            
+        except Exception as e:
+            logger.error(f"Error querying bills for COGS: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {}
+    
+    def _get_expenses_for_cogs(
+        self,
+        start_date: str,
+        end_date: str,
+        account_numbers: List[str]
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Query expense transactions (Purchase, Expense) with COGS accounts
+        
+        Extracts COGS project data from Purchase and Expense transactions by:
+        1. Querying Purchase and Expense transactions in date range
+        2. Filtering lines where AccountBasedExpenseLineDetail.AccountRef.name starts with account number
+        3. Extracting project from AccountBasedExpenseLineDetail.CustomerRef.name
+        4. Aggregating amounts by project
+        
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            account_numbers: List of account numbers to query (e.g., ['5001', '5011'])
+        
+        Returns:
+            Dictionary mapping account numbers to project breakdowns:
+            {
+                '5001': {'A6 Enterprise Services': 45000.00, 'CDSP': 40000.00, ...},
+                '5011': {'A6 Enterprise Services': 15000.00, 'A6 DHO': 12000.00, ...}
+            }
+        """
+        try:
+            logger.info("="*80)
+            logger.info("FETCHING COGS FROM EXPENSES/PURCHASES")
+            logger.info(f"Accounts: {account_numbers}")
+            logger.info(f"Date range: {start_date} to {end_date}")
+            logger.info("="*80)
+            
+            # Query both Purchase and Expense transaction types
+            queries = [
+                f"SELECT * FROM Purchase WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' MAXRESULTS 1000",
+                f"SELECT * FROM Expense WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' MAXRESULTS 1000"
+            ]
+            
+            # Initialize result structure keyed by account number
+            cogs_data = {}
+            for account_num in account_numbers:
+                cogs_data[account_num] = {}
+            
+            total_processed = 0
+            total_skipped = 0
+            
+            for query in queries:
+                txn_type = 'Purchase' if 'Purchase' in query else 'Expense'
+                logger.info(f"Querying {txn_type} transactions...")
+                
+                params = {'query': query, 'minorversion': '65'}
+                data = self._make_request('query', params)
+                
+                if not data or 'QueryResponse' not in data:
+                    logger.warning(f"No {txn_type} data returned from query")
+                    continue
+                
+                transactions = data['QueryResponse'].get(txn_type, [])
+                logger.info(f"Processing {len(transactions)} {txn_type} transactions for COGS")
+                
+                processed_count = 0
+                skipped_count = 0
+                
+                for txn in transactions:
+                    txn_id = txn.get('Id', 'N/A')
+                    lines = txn.get('Line', [])
+                    
+                    if not lines:
+                        continue
+                    
+                    # Get transaction-level customer reference (fallback)
+                    transaction_customer_ref = txn.get('CustomerRef', {})
+                    transaction_customer_name = transaction_customer_ref.get('name', '')
+                    
+                    for line in lines:
+                        # Skip group lines
+                        if line.get('GroupLineDetail'):
+                            continue
+                        
+                        # Get account-based expense line detail
+                        line_detail = (
+                            line.get('AccountBasedExpenseLineDetail') or
+                            line.get('ExpenseLineDetail') or
+                            line.get('ItemBasedExpenseLineDetail')
+                        )
+                        
+                        if not line_detail:
+                            continue
+                        
+                        # Check ClassRef first - if it belongs to GA (8005), skip this line
+                        class_ref = line_detail.get('ClassRef', {})
+                        if class_ref and self._classref_belongs_to_ga(class_ref):
+                            logger.debug(f"  ⚠️ Skipping {txn_type} {txn_id} line - ClassRef belongs to GA (8005): {class_ref.get('name', 'N/A')}")
+                            skipped_count += 1
+                            continue
+                        
+                        # Get account reference
+                        account_ref = line_detail.get('AccountRef', {})
+                        account_name = account_ref.get('name', '')
+                        
+                        if not account_name:
+                            continue
+                        
+                        # Extract account number from account name
+                        account_num = None
+                        account_match = re.search(r'(\d{4})', account_name)
+                        if account_match:
+                            account_num = account_match.group(1)
+                        else:
+                            # Try to match by name patterns
+                            account_name_lower = account_name.lower()
+                            if 'salaries' in account_name_lower and 'wage' in account_name_lower:
+                                if 'cogs' in account_name_lower or 'cost of goods' in account_name_lower:
+                                    account_num = '5001'
+                            elif 'direct' in account_name_lower and '1099' in account_name_lower and 'labor' in account_name_lower:
+                                account_num = '5011'
+                        
+                        # Check if this line is for one of our COGS accounts
+                        if not account_num or account_num not in account_numbers:
+                            continue
+                        
+                        # Get amount
+                        amount = float(line.get('Amount', 0))
+                        if amount == 0:
+                            logger.debug(f"  ⚠️ Skipping {txn_type} {txn_id} line - Zero amount")
+                            skipped_count += 1
+                            continue
+                        
+                        # Extract project name from CustomerRef
+                        project_name = None
+                        
+                        # Priority 1: Line-level CustomerRef
+                        line_customer_ref = line_detail.get('CustomerRef', {})
+                        if line_customer_ref:
+                            customer_name = line_customer_ref.get('name', '')
+                            if customer_name:
+                                # Handle "Parent:Project" format
+                                if ':' in customer_name:
+                                    project_name = customer_name.split(':')[-1].strip()
+                                else:
+                                    project_name = customer_name.strip()
+                                
+                                # Normalize project name
+                                normalized = self._normalize_project_name(project_name)
+                                if normalized:
+                                    project_name = normalized
+                                else:
+                                    extracted = self._extract_project_name(project_name)
+                                    if extracted:
+                                        project_name = extracted
+                        
+                        # Priority 2: Transaction-level CustomerRef
+                        if not project_name and transaction_customer_name:
+                            if ':' in transaction_customer_name:
+                                project_name = transaction_customer_name.split(':')[-1].strip()
+                            else:
+                                project_name = transaction_customer_name.strip()
+                            
+                            normalized = self._normalize_project_name(project_name)
+                            if normalized:
+                                project_name = normalized
+                            else:
+                                extracted = self._extract_project_name(project_name)
+                                if extracted:
+                                    project_name = extracted
+                        
+                        # If still no project name, categorize as "Unassigned"
+                        if not project_name:
+                            project_name = "Unassigned"
+                            logger.debug(f"  ⚠️ {txn_type} {txn_id}: No project name found for {account_name} (Amount: ${amount:,.2f}) - Categorizing as 'Unassigned'")
+                        
+                        # Add to result
+                        if project_name not in cogs_data[account_num]:
+                            cogs_data[account_num][project_name] = 0.0
+                        
+                        cogs_data[account_num][project_name] += abs(amount)
+                        processed_count += 1
+                        total_processed += 1
+                        
+                        logger.info(f"  ✅ {txn_type} {txn_id}: {account_num} → {project_name} = ${abs(amount):,.2f}")
+                
+                total_skipped += skipped_count
+                logger.info(f"  {txn_type}: Processed {processed_count} lines, skipped {skipped_count} lines")
+            
+            # Log summary
+            logger.info("="*80)
+            logger.info("EXPENSES/PURCHASES COGS SUMMARY:")
+            logger.info(f"  Total Processed: {total_processed} lines")
+            logger.info(f"  Total Skipped: {total_skipped} lines")
+            for account_num, projects in cogs_data.items():
+                if projects:
+                    total = sum(projects.values())
+                    logger.info(f"  Account {account_num}: {len(projects)} projects, Total: ${total:,.2f}")
+                    for project_name, project_amount in sorted(projects.items(), key=lambda x: x[1], reverse=True)[:5]:
+                        logger.info(f"    • {project_name}: ${project_amount:,.2f}")
+            logger.info("="*80)
+            
+            return cogs_data
+            
+        except Exception as e:
+            logger.error(f"Error querying expenses for COGS: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {}
+    
+    def _merge_cogs_data(
+        self,
+        target: Dict[str, Dict[str, float]],
+        source: Dict[str, Dict[str, float]]
+    ) -> None:
+        """
+        Merge COGS data from multiple sources (Journal Entries + Bills + Expenses)
+        
+        Combines project breakdowns from different transaction types, summing amounts
+        for the same account + project combinations.
+        
+        Args:
+            target: Target dictionary to merge into (modified in place)
+            source: Source dictionary to merge from
+        """
+        for account_num, projects in source.items():
+            if account_num not in target:
+                target[account_num] = {}
+            
+            for project, amount in projects.items():
+                if project in target[account_num]:
+                    target[account_num][project] += amount
+                else:
+                    target[account_num][project] = amount
     
     def _parse_pl_detail_row(
         self,
@@ -1461,6 +2070,7 @@ class QBODataFetcher:
             'a6 va form engine': 'A6 VA Form Engine',
             # Other projects
             'tws flra': 'TWS FLRA',
+            'flra': 'TWS FLRA',  # FLRA alone maps to TWS FLRA
             'cdsp': 'CDSP',
             'perigean': 'Perigean',
             'dmva': 'DMVA',
@@ -1472,8 +2082,8 @@ class QBODataFetcher:
                 logger.debug(f"  ✓ Extracted project '{project_name}' from description keyword '{keyword}'")
                 return project_name
         
-        # Also check for project codes in format like "2-25-0022 VA CIE"
-        # Extract project code pattern (e.g., "VA CIE" from "2-25-0022 VA CIE")
+        # Also check for project codes in format like "2-25-0022 VA CIE" or "2-25-0025 Financial Management"
+        # Pattern 1: Extract project code pattern (e.g., "VA CIE" from "2-25-0022 VA CIE")
         project_code_pattern = r'\b([A-Z]{2,}\s+[A-Z]{2,})\b'
         matches = re.findall(project_code_pattern, description.upper())
         for match in matches:
@@ -1485,6 +2095,51 @@ class QBODataFetcher:
             if match in code_mapping:
                 logger.debug(f"  ✓ Extracted project '{code_mapping[match]}' from description code '{match}'")
                 return code_mapping[match]
+        
+        # Pattern 2: Extract project codes like "2-25-0025 Financial Management" → "A6 Financial Management"
+        # Format: "2-25-XXXX Project Name" where XXXX is a number
+        project_code_with_name_pattern = r'2-25-\d{4}\s+([A-Z][a-zA-Z\s]+)'
+        matches = re.findall(project_code_with_name_pattern, description)
+        for match in matches:
+            project_name_candidate = match.strip()
+            # Map known project code names to standard project names
+            project_code_name_mapping = {
+                'Financial Management': 'A6 Financial Management',
+                'Enterprise Services': 'A6 Enterprise Services',
+                'Surge Support': 'A6 Surge Support',
+                'DHO': 'A6 DHO',
+                'CIE': 'A6 CIE',
+                'Cross Benefits': 'A6 Cross Benefits',
+                'CHAMPVA': 'A6 CHAMPVA',
+                'Toxic Exposure': 'A6 Toxic Exposure',
+                'VA Form Engine': 'A6 VA Form Engine',
+            }
+            
+            # Check for exact match
+            if project_name_candidate in project_code_name_mapping:
+                project_name = project_code_name_mapping[project_name_candidate]
+                logger.debug(f"  ✓ Extracted project '{project_name}' from project code pattern '{project_name_candidate}'")
+                return project_name
+            
+            # Check for partial match (e.g., "Financial Management" contains "Financial Management")
+            for code_name, standard_name in project_code_name_mapping.items():
+                if code_name.lower() in project_name_candidate.lower():
+                    logger.debug(f"  ✓ Extracted project '{standard_name}' from project code pattern '{project_name_candidate}' (matched '{code_name}')")
+                    return standard_name
+        
+        # Pattern 3: Extract FLRA project codes like "2-24-0018 FLRA" or "2-25-0026 FLRA" → "TWS FLRA"
+        # Format: "2-XX-XXXX FLRA" where XX is 24 or 25 and XXXX is a number
+        flra_project_code_pattern = r'2-(24|25)-\d{4}\s+FLRA'
+        flra_matches = re.findall(flra_project_code_pattern, description, re.IGNORECASE)
+        if flra_matches:
+            logger.debug(f"  ✓ Extracted project 'TWS FLRA' from FLRA project code pattern")
+            return 'TWS FLRA'
+        
+        # Pattern 4: Check for "FLRA" followed by task order info (e.g., "FLRA TO11", "FLRA TO14/TO16")
+        flra_task_order_pattern = r'FLRA\s+TO\d+'
+        if re.search(flra_task_order_pattern, description, re.IGNORECASE):
+            logger.debug(f"  ✓ Extracted project 'TWS FLRA' from FLRA task order pattern")
+            return 'TWS FLRA'
         
         return None
     
@@ -1696,45 +2351,61 @@ class QBODataFetcher:
                     for account_name, projects in project_expenses.items():
                         logger.info(f"Processing {account_name}: {len(projects)} projects")
                         
-                        # Map renamed account names to possible original names in expense_hierarchy
-                        # The hierarchical parser uses original names, but get_expenses_by_project returns renamed names
-                        possible_names = [account_name]  # Try the returned name first
+                        # Extract account number from account_name (e.g., "5001" from "Billable Salaries and Wages" or "5011 Direct 1099 Labor")
+                        account_num = None
+                        account_match = re.search(r'(\d{4})', account_name)
+                        if account_match:
+                            account_num = account_match.group(1)
                         
-                        # Add original name variations
-                        if account_name == "Billable Salaries and Wages":
-                            possible_names.extend(["5001 Salaries & wages", "5001 Salaries and Wages", "Salaries & wages"])
-                        elif account_name == "5011 Direct 1099 Labor":
-                            possible_names.extend(["5011 Direct 1099 Labor"])  # This one might match as-is
+                        if not account_num:
+                            logger.warning(f"  ⚠️ Could not extract account number from '{account_name}'")
+                            continue
                         
-                        # Find this account in the expense_hierarchy
-                        # These accounts should be under "5000 COGS" primary
+                        # Find this account in the expense_hierarchy by matching account number
+                        # The hierarchical parser may use different name formats, so we match by account number
                         found = False
                         for primary_name, primary_data in expense_hierarchy.items():
                             if 'secondary' not in primary_data:
                                 continue
                             
-                            # Try each possible name
+                            # Search through secondaries to find one that matches the account number
                             matching_secondary_name = None
-                            for possible_name in possible_names:
-                                if possible_name in primary_data['secondary']:
-                                    matching_secondary_name = possible_name
+                            for secondary_name in primary_data['secondary'].keys():
+                                # Extract account number from secondary name
+                                sec_match = re.search(r'(\d{4})', secondary_name)
+                                if sec_match and sec_match.group(1) == account_num:
+                                    matching_secondary_name = secondary_name
                                     break
                             
                             if matching_secondary_name:
                                 # Add projects data to this secondary node
                                 secondary_data = primary_data['secondary'][matching_secondary_name]
                                 secondary_data['projects'] = projects
+                                
+                                # Validate: Check if project total exceeds secondary total (log warning if it does)
+                                project_total = sum(projects.values())
+                                secondary_total = secondary_data.get('total', 0)
+                                if project_total > secondary_total * 1.01:  # Allow 1% tolerance for rounding
+                                    logger.warning(f"  ⚠️ Project total (${project_total:,.2f}) exceeds secondary total (${secondary_total:,.2f}) for {matching_secondary_name}")
+                                
                                 logger.info(f"  ✅ Added project breakdown to {matching_secondary_name} under {primary_name}")
                                 logger.info(f"     Projects: {list(projects.keys())}")
-                                logger.info(f"     Total: ${sum(projects.values()):,.2f}")
+                                logger.info(f"     Project Total: ${project_total:,.2f} (Secondary Total: ${secondary_total:,.2f})")
                                 found = True
                                 break
                         
                         if not found:
-                            logger.warning(f"  ⚠️ Could not find {account_name} in expense_hierarchy")
+                            logger.warning(f"  ⚠️ Could not find account {account_num} ({account_name}) in expense_hierarchy")
                             all_secondaries = [sec for prim in expense_hierarchy.values() for sec in prim.get('secondary', {}).keys()]
                             logger.warning(f"     Available secondaries: {all_secondaries}")
-                            logger.warning(f"     Tried names: {possible_names}")
+                            # Show account numbers in available secondaries for debugging
+                            sec_account_nums = []
+                            for sec in all_secondaries:
+                                sec_match = re.search(r'(\d{4})', sec)
+                                if sec_match:
+                                    sec_account_nums.append(f"{sec_match.group(1)} ({sec})")
+                            if sec_account_nums:
+                                logger.warning(f"     Available secondary account numbers: {sec_account_nums}")
                 else:
                     logger.warning("No project expenses retrieved")
                     

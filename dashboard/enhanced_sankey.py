@@ -347,17 +347,10 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                 tertiaries = node_tertiary_data[i]
                 logger.info(f"  Node {i} ({node_labels[i].split('<br>')[0]}): Creating hover data with {len(tertiaries)} tertiaries")
                 
-                # Format tertiary breakdown (show top 10, then summarize if more)
-                max_items = 10
+                # Format tertiary breakdown (show all items)
                 tertiary_lines = []
-                for tert_name, tert_amount in tertiaries[:max_items]:
+                for tert_name, tert_amount in tertiaries:
                     tertiary_lines.append(f"• {tert_name}: ${tert_amount:,.0f}")
-                
-                # If more than 10, add summary
-                if len(tertiaries) > max_items:
-                    remaining_count = len(tertiaries) - max_items
-                    remaining_total = sum(amount for _, amount in tertiaries[max_items:])
-                    tertiary_lines.append(f"...and {remaining_count} more item{'s' if remaining_count > 1 else ''}: ${remaining_total:,.0f}")
                 
                 breakdown_parts.append(("<b>Breakdown:</b><br>" + "<br>".join(tertiary_lines)))
             
@@ -369,17 +362,10 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                 # Sort projects by amount (descending)
                 sorted_projects = sorted(projects.items(), key=lambda x: x[1], reverse=True)
                 
-                # Format project breakdown (show top 10, then summarize if more)
-                max_items = 10
+                # Format project breakdown (show all projects)
                 project_lines = []
-                for project_name, project_amount in sorted_projects[:max_items]:
+                for project_name, project_amount in sorted_projects:
                     project_lines.append(f"• {project_name}: ${project_amount:,.0f}")
-                
-                # If more than 10, add summary
-                if len(sorted_projects) > max_items:
-                    remaining_count = len(sorted_projects) - max_items
-                    remaining_total = sum(amount for _, amount in sorted_projects[max_items:])
-                    project_lines.append(f"...and {remaining_count} more project{'s' if remaining_count > 1 else ''}: ${remaining_total:,.0f}")
                 
                 breakdown_parts.append(("<b>Projects:</b><br>" + "<br>".join(project_lines)))
             
