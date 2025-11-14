@@ -929,6 +929,23 @@ class QBODataFetcher:
                         skipped_count += 1
                         continue
                     
+                    # Check for Rippling salary transactions with no entity/project attribution
+                    # These are duplicate entries and should be excluded from COGS
+                    if '[rippling] salary for' in combined_description:
+                        # Check if entity is empty (no project attribution)
+                        entity = line.get('Entity', {})
+                        entity_ref = entity.get('EntityRef', {})
+                        entity_name = entity_ref.get('name', '') if entity_ref else ''
+                        
+                        # If no entity and it's a COGS class (not GA), skip it as duplicate
+                        if not entity_name:
+                            # Check if ClassRef exists and is not GA
+                            class_ref = journal_detail.get('ClassRef', {})
+                            if not class_ref or not self._classref_belongs_to_ga(class_ref):
+                                logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - Rippling salary with no entity (duplicate entry): {line_description[:100] if line_description else 'N/A'}")
+                                skipped_count += 1
+                                continue
+                    
                     # Extract project name from Entity
                     project_name = None
                     entity = line.get('Entity', {})
