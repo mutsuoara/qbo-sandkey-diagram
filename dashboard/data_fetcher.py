@@ -827,6 +827,13 @@ class QBODataFetcher:
             # Track "Labor Allocation" totals for account 5001
             labor_allocation_total = 0.0
             
+            # Track excluded amounts by reason for debugging
+            excluded_amounts = {
+                'rippling_no_project': 0.0,
+                'very_short_description': 0.0,
+                'empty_description': 0.0
+            }
+            
             entries = data['QueryResponse'].get('JournalEntry', [])
             logger.info(f"Processing {len(entries)} journal entries for COGS")
             
@@ -1006,7 +1013,15 @@ class QBODataFetcher:
                         
                         # Exclude if any of the conditions are met
                         if should_exclude:
-                            logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - {exclude_reason}: {line_description[:100] if line_description else 'N/A'}")
+                            # Track excluded amounts by reason
+                            if 'Rippling' in exclude_reason:
+                                excluded_amounts['rippling_no_project'] += abs(amount)
+                            elif 'Very short' in exclude_reason:
+                                excluded_amounts['very_short_description'] += abs(amount)
+                            elif 'Empty' in exclude_reason:
+                                excluded_amounts['empty_description'] += abs(amount)
+                            
+                            logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - {exclude_reason} (Amount: ${abs(amount):,.2f}): {line_description[:100] if line_description else 'N/A'}")
                             skipped_count += 1
                             continue
                         
