@@ -1493,14 +1493,7 @@ class QBODataFetcher:
                     if not journal_detail:
                         continue
                     
-                    # Check ClassRef - ONLY include if it belongs to GA (8005)
-                    class_ref = journal_detail.get('ClassRef', {})
-                    if not class_ref or not self._classref_belongs_to_ga(class_ref):
-                        logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - ClassRef does not belong to GA (8005)")
-                        skipped_count += 1
-                        continue
-                    
-                    # Get account reference
+                    # Get account reference first
                     account_ref = journal_detail.get('AccountRef', {})
                     account_name = account_ref.get('name', '')
                     
@@ -1521,6 +1514,21 @@ class QBODataFetcher:
                     
                     # Check if this line is for one of our GA accounts
                     if not account_num or account_num not in account_numbers:
+                        continue
+                    
+                    # Check ClassRef - ONLY include if it belongs to GA (8005) OR if account is 8005 (some transactions may not have ClassRef)
+                    class_ref = journal_detail.get('ClassRef', {})
+                    if class_ref:
+                        # If ClassRef exists, it must belong to GA
+                        if not self._classref_belongs_to_ga(class_ref):
+                            logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - ClassRef does not belong to GA (8005): {class_ref.get('name', 'N/A')}")
+                            skipped_count += 1
+                            continue
+                    # If no ClassRef but account is 8005, include it (assume it's GA)
+                    elif account_num != '8005':
+                        # If no ClassRef and not account 8005, skip
+                        logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - No ClassRef and account is not 8005")
+                        skipped_count += 1
                         continue
                     
                     # Get amount and posting type
@@ -1669,13 +1677,7 @@ class QBODataFetcher:
                     if not expense_line:
                         continue
                     
-                    # Check ClassRef - ONLY include if it belongs to GA (8005)
-                    class_ref = expense_line.get('ClassRef', {})
-                    if not class_ref or not self._classref_belongs_to_ga(class_ref):
-                        skipped_count += 1
-                        continue
-                    
-                    # Get account reference
+                    # Get account reference first
                     account_ref = expense_line.get('AccountRef', {})
                     account_name = account_ref.get('name', '')
                     
@@ -1690,6 +1692,19 @@ class QBODataFetcher:
                     
                     # Check if this is for one of our GA accounts
                     if not account_num or account_num not in account_numbers:
+                        continue
+                    
+                    # Check ClassRef - ONLY include if it belongs to GA (8005) OR if account is 8005 (some transactions may not have ClassRef)
+                    class_ref = expense_line.get('ClassRef', {})
+                    if class_ref:
+                        # If ClassRef exists, it must belong to GA
+                        if not self._classref_belongs_to_ga(class_ref):
+                            skipped_count += 1
+                            continue
+                    # If no ClassRef but account is 8005, include it (assume it's GA)
+                    elif account_num != '8005':
+                        # If no ClassRef and not account 8005, skip
+                        skipped_count += 1
                         continue
                     
                     # Get amount
@@ -1800,13 +1815,7 @@ class QBODataFetcher:
                         if not expense_line:
                             continue
                         
-                        # Check ClassRef - ONLY include if it belongs to GA (8005)
-                        class_ref = expense_line.get('ClassRef', {})
-                        if not class_ref or not self._classref_belongs_to_ga(class_ref):
-                            skipped_count += 1
-                            continue
-                        
-                        # Get account reference
+                        # Get account reference first
                         account_ref = expense_line.get('AccountRef', {})
                         account_name = account_ref.get('name', '')
                         
@@ -1821,6 +1830,19 @@ class QBODataFetcher:
                         
                         # Check if this is for one of our GA accounts
                         if not account_num or account_num not in account_numbers:
+                            continue
+                        
+                        # Check ClassRef - ONLY include if it belongs to GA (8005) OR if account is 8005 (some transactions may not have ClassRef)
+                        class_ref = expense_line.get('ClassRef', {})
+                        if class_ref:
+                            # If ClassRef exists, it must belong to GA
+                            if not self._classref_belongs_to_ga(class_ref):
+                                skipped_count += 1
+                                continue
+                        # If no ClassRef but account is 8005, include it (assume it's GA)
+                        elif account_num != '8005':
+                            # If no ClassRef and not account 8005, skip
+                            skipped_count += 1
                             continue
                         
                         # Get amount
