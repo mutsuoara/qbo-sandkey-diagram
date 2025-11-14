@@ -682,7 +682,8 @@ class QBODataFetcher:
         self,
         start_date: str,
         end_date: str,
-        account_numbers: List[str]
+        account_numbers: List[str],
+        collect_unassigned_details: bool = False
     ) -> Dict[str, Dict[str, float]]:
         """
         Query journal entries that allocate COGS to projects
@@ -731,6 +732,12 @@ class QBODataFetcher:
             cogs_data = {}
             for account_num in account_numbers:
                 cogs_data[account_num] = {}
+            
+            # Store detailed unassigned transaction info if requested
+            unassigned_details = {}
+            if collect_unassigned_details:
+                for account_num in account_numbers:
+                    unassigned_details[account_num] = []
             
             entries = data['QueryResponse'].get('JournalEntry', [])
             logger.info(f"Processing {len(entries)} journal entries for COGS")
@@ -863,6 +870,20 @@ class QBODataFetcher:
                     if not project_name:
                         project_name = "Unassigned"
                         logger.debug(f"  ⚠️ JE #{entry_number}: No project name found for {account_name} (Amount: ${amount:,.2f}) - Categorizing as 'Unassigned'")
+                        
+                        # Collect detailed information about unassigned transactions
+                        if collect_unassigned_details:
+                            unassigned_details[account_num].append({
+                                'doc_number': entry_number,
+                                'date': entry.get('TxnDate', 'N/A'),
+                                'amount': abs(amount),
+                                'account_name': account_name,
+                                'line_description': line_description,
+                                'txn_description': txn_description,
+                                'entity_name': entity_ref.get('name', '') if entity_ref else '',
+                                'class_ref': class_ref.get('name', '') if class_ref else '',
+                                'posting_type': posting_type
+                            })
                     
                     # Add to result
                     if project_name not in cogs_data[account_num]:
@@ -885,6 +906,10 @@ class QBODataFetcher:
                     for project_name, project_amount in sorted(projects.items(), key=lambda x: x[1], reverse=True)[:5]:
                         logger.info(f"    • {project_name}: ${project_amount:,.2f}")
             logger.info("="*80)
+            
+            # Store unassigned details as instance variable if collected
+            if collect_unassigned_details:
+                self._unassigned_journal_entry_details = unassigned_details
             
             return cogs_data
             

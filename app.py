@@ -1180,6 +1180,84 @@ def test_journal_entries_cogs():
             "traceback": traceback.format_exc()
         })
 
+@app.server.route('/test/unassigned-5001-details')
+def test_unassigned_5001_details():
+    """Get detailed information about transactions categorized as 'Unassigned' for account 5001"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime, timedelta
+    from flask import jsonify
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        if not tokens:
+            return jsonify({"error": "No tokens found - please authenticate with QuickBooks first"})
+        
+        environment = credentials.get('environment', 'sandbox')
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=environment
+        )
+        
+        # Get Year to Date (same as dashboard default)
+        end_date = datetime.now()
+        start_date = datetime(end_date.year, 1, 1)
+        
+        # Call with collect_unassigned_details=True
+        cogs_data = data_fetcher._get_journal_entries_for_cogs(
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d'),
+            ['5001', '5011'],
+            collect_unassigned_details=True
+        )
+        
+        # Get unassigned details from the instance variable
+        unassigned_details = getattr(data_fetcher, '_unassigned_journal_entry_details', {})
+        
+        # Focus on account 5001
+        account_5001_unassigned = unassigned_details.get('5001', [])
+        
+        # Calculate totals
+        total_unassigned_amount = sum(txn['amount'] for txn in account_5001_unassigned)
+        unassigned_count = len(account_5001_unassigned)
+        
+        # Sort by amount descending
+        account_5001_unassigned_sorted = sorted(account_5001_unassigned, key=lambda x: x['amount'], reverse=True)
+        
+        # Get summary statistics
+        summary = {
+            'total_transactions': unassigned_count,
+            'total_amount': total_unassigned_amount,
+            'average_amount': total_unassigned_amount / unassigned_count if unassigned_count > 0 else 0,
+            'date_range': {
+                'start': start_date.strftime('%Y-%m-%d'),
+                'end': end_date.strftime('%Y-%m-%d')
+            }
+        }
+        
+        return jsonify({
+            "success": True,
+            "account": "5001",
+            "account_name": "Billable Salaries and Wages",
+            "summary": summary,
+            "unassigned_transactions": account_5001_unassigned_sorted,
+            "cogs_breakdown": cogs_data.get('5001', {}),
+            "note": "These transactions were categorized as 'Unassigned' because no project could be extracted from Entity, Description, or transaction-level fields"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in unassigned 5001 details endpoint: {e}")
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
+
 @app.server.route('/test/journal-entries-sample')
 def test_journal_entries_sample():
     """Test endpoint to pull the first 10 journal entries with all available fields"""
