@@ -2357,6 +2357,22 @@ class QBODataFetcher:
                         if account_match:
                             account_num = account_match.group(1)
                         
+                        # Fallback: Map known account names to account numbers if regex doesn't find one
+                        if not account_num:
+                            account_name_mapping = {
+                                'Billable Salaries and Wages': '5001',
+                                'Salaries and Wages': '5001',
+                                'Salaries & wages': '5001',
+                                '5011 Direct 1099 Labor': '5011',
+                                'Direct 1099 Labor': '5011',
+                            }
+                            account_name_lower = account_name.lower()
+                            for mapped_name, mapped_num in account_name_mapping.items():
+                                if mapped_name.lower() in account_name_lower or account_name_lower in mapped_name.lower():
+                                    account_num = mapped_num
+                                    logger.info(f"  ✓ Mapped account name '{account_name}' to account number {account_num}")
+                                    break
+                        
                         if not account_num:
                             logger.warning(f"  ⚠️ Could not extract account number from '{account_name}'")
                             continue
