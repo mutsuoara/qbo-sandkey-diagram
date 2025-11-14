@@ -2093,6 +2093,7 @@ class QBODataFetcher:
             'champva': 'A6 CHAMPVA',
             'a6 toxic exposure': 'A6 Toxic Exposure',
             'a6 va form engine': 'A6 VA Form Engine',
+            'va form engine': 'A6 VA Form Engine',  # Also match without "A6" prefix
             # Other projects
             'tws flra': 'TWS FLRA',
             'flra': 'TWS FLRA',  # FLRA alone maps to TWS FLRA
@@ -2108,25 +2109,28 @@ class QBODataFetcher:
                 return project_name
         
         # Also check for project codes in format like "2-25-0022 VA CIE" or "2-25-0025 Financial Management"
-        # Pattern 1: Extract project code pattern (e.g., "VA CIE" from "2-25-0022 VA CIE")
-        project_code_pattern = r'\b([A-Z]{2,}\s+[A-Z]{2,})\b'
+        # Pattern 1: Extract project code pattern (e.g., "VA CIE" or "VA Form Engine" from descriptions)
+        # Match 2-3 word patterns starting with uppercase letters
+        project_code_pattern = r'\b([A-Z]{2,}\s+[A-Z]{2,}(?:\s+[A-Z]{2,})?)\b'
         matches = re.findall(project_code_pattern, description.upper())
         for match in matches:
             # Map project codes to standard names
             code_mapping = {
                 'VA CIE': 'A6 CIE',
                 'VA CHAMPVA': 'A6 CHAMPVA',
+                'VA FORM ENGINE': 'A6 VA Form Engine',
             }
             if match in code_mapping:
                 logger.debug(f"  ✓ Extracted project '{code_mapping[match]}' from description code '{match}'")
                 return code_mapping[match]
         
-        # Pattern 2: Extract project codes like "2-25-0025 Financial Management" → "A6 Financial Management"
-        # Format: "2-25-XXXX Project Name" where XXXX is a number
-        project_code_with_name_pattern = r'2-25-\d{4}\s+([A-Z][a-zA-Z\s]+)'
+        # Pattern 2: Extract project codes like "2-25-0025 Financial Management" or "2-24-0015 VA Form Engine" → "A6 Financial Management" or "A6 VA Form Engine"
+        # Format: "2-XX-XXXX Project Name" where XX is 24 or 25 and XXXX is a number
+        project_code_with_name_pattern = r'2-(24|25)-\d{4}\s+([A-Z][a-zA-Z\s]+)'
         matches = re.findall(project_code_with_name_pattern, description)
         for match in matches:
-            project_name_candidate = match.strip()
+            # match is a tuple: (year_code, project_name)
+            project_name_candidate = match[1].strip() if isinstance(match, tuple) else match.strip()
             # Map known project code names to standard project names
             project_code_name_mapping = {
                 'Financial Management': 'A6 Financial Management',
