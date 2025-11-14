@@ -913,11 +913,11 @@ class QBODataFetcher:
                         target_account = None
                         if '9-overhead' in combined_description:
                             target_account = '7001'
-                        elif '9-general' in combined_description or '9-general & administrative' in combined_description:
+                        elif '9-general' in combined_description or '9-general & administrative' in combined_description or '9-general and administrative' in combined_description:
                             target_account = '8005'
                         elif '9-it' in combined_description:
                             target_account = '8005'
-                        elif '9-research' in combined_description or '9-research & development' in combined_description:
+                        elif '9-research' in combined_description or '9-research & development' in combined_description or '9-research and development' in combined_description:
                             target_account = '8601'
                         elif '9-business' in combined_description or '9-business development' in combined_description:
                             target_account = '8005'
