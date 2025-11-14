@@ -824,6 +824,9 @@ class QBODataFetcher:
                 for account_num in account_numbers:
                     unassigned_details[account_num] = []
             
+            # Track "Labor Allocation" totals for account 5001
+            labor_allocation_total = 0.0
+            
             entries = data['QueryResponse'].get('JournalEntry', [])
             logger.info(f"Processing {len(entries)} journal entries for COGS")
             
@@ -892,14 +895,37 @@ class QBODataFetcher:
                         skipped_count += 1
                         continue
                     
-                    # Check if this is an internal charge (Salary for 9-*)
-                    # These don't belong in COGS accounts 5001/5011, they have their own accounts
+                    # Get descriptions for checking patterns
                     line_description = line.get('Description', '')
                     txn_description = entry.get('PrivateNote', '') or entry.get('Description', '')
                     combined_description = (line_description + ' ' + txn_description).lower()
                     
-                    if 'salary for 9-' in combined_description:
-                        logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - Internal charge (Salary for 9-*): {line_description[:100] if line_description else 'N/A'}")
+                    # Track "Labor Allocation" totals for account 5001
+                    if account_num == '5001' and 'labor allocation' in combined_description:
+                        labor_allocation_total += abs(amount)
+                        logger.debug(f"  📊 Labor Allocation transaction: JE #{entry_number}, Amount: ${abs(amount):,.2f}")
+                    
+                    # Check if this is an internal charge (Salary for 9-*)
+                    # These don't belong in COGS accounts 5001/5011, they have their own accounts
+                    # Map 9- patterns to target accounts and skip from COGS
+                    if '9-' in combined_description or 'salary for 9-' in combined_description:
+                        # Map 9- patterns to target accounts
+                        target_account = None
+                        if '9-overhead' in combined_description:
+                            target_account = '7001'
+                        elif '9-general' in combined_description or '9-general & administrative' in combined_description:
+                            target_account = '8005'
+                        elif '9-it' in combined_description:
+                            target_account = '8005'
+                        elif '9-research' in combined_description or '9-research & development' in combined_description:
+                            target_account = '8601'
+                        elif '9-business' in combined_description or '9-business development' in combined_description:
+                            target_account = '8005'
+                        
+                        if target_account:
+                            logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - Internal charge (9-*) routed to {target_account}: {line_description[:100] if line_description else 'N/A'}")
+                        else:
+                            logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - Internal charge (9-*) with unknown pattern: {line_description[:100] if line_description else 'N/A'}")
                         skipped_count += 1
                         continue
                     
@@ -990,6 +1016,8 @@ class QBODataFetcher:
                     logger.info(f"  Account {account_num}: {len(projects)} projects, Total: ${total:,.2f}")
                     for project_name, project_amount in sorted(projects.items(), key=lambda x: x[1], reverse=True)[:5]:
                         logger.info(f"    • {project_name}: ${project_amount:,.2f}")
+            if labor_allocation_total > 0:
+                logger.info(f"  📊 Account 5001 Labor Allocation Total: ${labor_allocation_total:,.2f}")
             logger.info("="*80)
             
             # Store unassigned details as instance variable if collected
