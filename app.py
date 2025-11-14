@@ -1258,6 +1258,164 @@ def test_unassigned_5001_details():
             "traceback": traceback.format_exc()
         })
 
+@app.server.route('/test/cogs-rippling-salaries-no-entity')
+def test_cogs_rippling_salaries_no_entity():
+    """Find COGS transactions with Rippling salary pattern but no entity/project attribution"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime
+    from flask import jsonify
+    import re
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        if not tokens:
+            return jsonify({"error": "No tokens found - please authenticate with QuickBooks first"})
+        
+        environment = credentials.get('environment', 'sandbox')
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=environment
+        )
+        
+        # Get Year to Date (same as dashboard default)
+        end_date = datetime.now()
+        start_date = datetime(end_date.year, 1, 1)
+        
+        # Query JournalEntry transactions
+        query = (
+            f"SELECT * FROM JournalEntry "
+            f"WHERE TxnDate >= '{start_date.strftime('%Y-%m-%d')}' AND TxnDate <= '{end_date.strftime('%Y-%m-%d')}' "
+            f"MAXRESULTS 1000"
+        )
+        
+        params = {'query': query, 'minorversion': '65'}
+        data = data_fetcher._make_request('query', params)
+        
+        if not data or 'QueryResponse' not in data:
+            return jsonify({"error": "No journal entry data returned"})
+        
+        entries = data['QueryResponse'].get('JournalEntry', [])
+        matching_transactions = []
+        
+        for entry in entries:
+            entry_number = entry.get('DocNumber', 'N/A')
+            lines = entry.get('Line', [])
+            
+            if not lines:
+                continue
+            
+            for line in lines:
+                journal_detail = line.get('JournalEntryLineDetail', {})
+                if not journal_detail:
+                    continue
+                
+                # Get account reference
+                account_ref = journal_detail.get('AccountRef', {})
+                account_name = account_ref.get('name', '')
+                
+                if not account_name:
+                    continue
+                
+                # Check if this is a COGS salaries account (5001)
+                account_num = None
+                account_match = re.search(r'(\d{4})', account_name)
+                if account_match:
+                    account_num = account_match.group(1)
+                else:
+                    account_name_lower = account_name.lower()
+                    if 'salaries' in account_name_lower and 'wage' in account_name_lower:
+                        if 'cogs' in account_name_lower or 'cost of goods' in account_name_lower:
+                            account_num = '5001'
+                
+                if account_num != '5001':
+                    continue
+                
+                # Get amount and posting type
+                amount = float(line.get('Amount', 0))
+                posting_type = journal_detail.get('PostingType', '')
+                
+                if posting_type != 'Debit' or amount == 0:
+                    continue
+                
+                # Check ClassRef - should be COGS class (not GA)
+                class_ref = journal_detail.get('ClassRef', {})
+                class_name = class_ref.get('name', '') if class_ref else ''
+                
+                # Skip if it belongs to GA
+                if class_ref and data_fetcher._classref_belongs_to_ga(class_ref):
+                    continue
+                
+                # Get descriptions
+                line_description = line.get('Description', '')
+                txn_description = entry.get('PrivateNote', '') or entry.get('Description', '')
+                combined_description = (line_description + ' ' + txn_description).lower()
+                
+                # Skip 9- patterns
+                if '9-' in combined_description or 'salary for 9-' in combined_description or '9 - ' in combined_description:
+                    continue
+                
+                # Check for Rippling salary pattern
+                if '[rippling] salary for' not in combined_description:
+                    continue
+                
+                # Check Entity - should be empty
+                entity = line.get('Entity', {})
+                entity_ref = entity.get('EntityRef', {})
+                entity_name = entity_ref.get('name', '') if entity_ref else ''
+                
+                if entity_name:
+                    continue  # Skip if entity exists
+                
+                # This matches our criteria
+                matching_transactions.append({
+                    'doc_number': entry_number,
+                    'date': entry.get('TxnDate', 'N/A'),
+                    'amount': abs(amount),
+                    'account_name': account_name,
+                    'class_ref': class_name,
+                    'line_description': line_description,
+                    'txn_description': txn_description,
+                    'entity_name': entity_name,
+                    'posting_type': posting_type
+                })
+        
+        # Sort by amount descending
+        matching_transactions_sorted = sorted(matching_transactions, key=lambda x: x['amount'], reverse=True)
+        
+        # Calculate totals
+        total_amount = sum(txn['amount'] for txn in matching_transactions)
+        
+        return jsonify({
+            "success": True,
+            "account": "5001",
+            "account_name": "Billable Salaries and Wages",
+            "summary": {
+                "total_transactions": len(matching_transactions),
+                "total_amount": total_amount,
+                "average_amount": total_amount / len(matching_transactions) if matching_transactions else 0,
+                "date_range": {
+                    "start": start_date.strftime('%Y-%m-%d'),
+                    "end": end_date.strftime('%Y-%m-%d')
+                }
+            },
+            "matching_transactions": matching_transactions_sorted,
+            "note": "Transactions with Rippling salary pattern, COGS class codes, but no entity/project attribution"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error in COGS Rippling salaries no entity endpoint: {e}")
+        import traceback
+        return jsonify({
+            "error": str(e),
+            "traceback": traceback.format_exc()
+        })
+
 @app.server.route('/test/journal-entries-sample')
 def test_journal_entries_sample():
     """Test endpoint to pull the first 10 journal entries with all available fields"""
