@@ -908,7 +908,7 @@ class QBODataFetcher:
                     # Check if this is an internal charge (Salary for 9-*)
                     # These don't belong in COGS accounts 5001/5011, they have their own accounts
                     # Map 9- patterns to target accounts and skip from COGS
-                    if '9-' in combined_description or 'salary for 9-' in combined_description:
+                    if '9-' in combined_description or 'salary for 9-' in combined_description or '9 - ' in combined_description:
                         # Map 9- patterns to target accounts
                         target_account = None
                         if '9-overhead' in combined_description:
