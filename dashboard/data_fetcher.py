@@ -1065,6 +1065,15 @@ class QBODataFetcher:
                         logger.info(f"    • {project_name}: ${project_amount:,.2f}")
             if labor_allocation_total > 0:
                 logger.info(f"  📊 Account 5001 Labor Allocation Total: ${labor_allocation_total:,.2f}")
+            
+            # Log excluded amounts for debugging
+            total_excluded = sum(excluded_amounts.values())
+            if total_excluded > 0:
+                logger.info(f"  ⚠️ EXCLUDED FROM COGS:")
+                logger.info(f"    • Rippling no project: ${excluded_amounts['rippling_no_project']:,.2f}")
+                logger.info(f"    • Very short descriptions: ${excluded_amounts['very_short_description']:,.2f}")
+                logger.info(f"    • Empty descriptions: ${excluded_amounts['empty_description']:,.2f}")
+                logger.info(f"    • Total Excluded: ${total_excluded:,.2f}")
             logger.info("="*80)
             
             # Store unassigned details as instance variable if collected
