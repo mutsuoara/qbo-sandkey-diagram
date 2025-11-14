@@ -678,6 +678,91 @@ class QBODataFetcher:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return {}
     
+    def get_expenses_by_project_for_ga(
+        self,
+        account_numbers: List[str],
+        start_date: str = None,
+        end_date: str = None
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Get expenses for GA accounts (e.g., 8005) broken down by project/customer
+        
+        Similar to get_expenses_by_project but specifically for GA accounts.
+        Filters FOR transactions with ClassRef belonging to GA (8005).
+        
+        Args:
+            account_numbers: List of account numbers to query (e.g., ['8005'])
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+        
+        Returns:
+            Dictionary mapping account names to project breakdowns
+        """
+        try:
+            if not start_date:
+                start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+            if not end_date:
+                end_date = datetime.now().strftime('%Y-%m-%d')
+            
+            logger.info("="*80)
+            logger.info(f"FETCHING GA EXPENSES BY PROJECT (Transaction-Level Queries)")
+            logger.info(f"Accounts: {account_numbers}")
+            logger.info(f"Date range: {start_date} to {end_date}")
+            logger.info("="*80)
+            
+            # Initialize result structure keyed by account number
+            ga_data = {}
+            for account_num in account_numbers:
+                ga_data[account_num] = {}
+            
+            # Query 1: Journal Entries
+            logger.info("Step 1: Querying Journal Entries for GA...")
+            journal_data = self._get_journal_entries_for_ga(start_date, end_date, account_numbers)
+            self._merge_cogs_data(ga_data, journal_data)
+            
+            # Query 2: Bills with GA line items
+            logger.info("Step 2: Querying Bills for GA...")
+            bill_data = self._get_bills_for_ga(start_date, end_date, account_numbers)
+            self._merge_cogs_data(ga_data, bill_data)
+            
+            # Query 3: Expense transactions (Checks, Purchases)
+            logger.info("Step 3: Querying Expenses/Purchases for GA...")
+            expense_data = self._get_expenses_for_ga(start_date, end_date, account_numbers)
+            self._merge_cogs_data(ga_data, expense_data)
+            
+            # Convert from account number keys to account name keys
+            expense_by_project = {}
+            for account_num, projects in ga_data.items():
+                if not projects:
+                    continue
+                
+                # Map account number to account name
+                if account_num == '8005':
+                    account_name = "8005 Salaries and Wages"
+                else:
+                    account_name = f"{account_num} GA Account"
+                
+                expense_by_project[account_name] = projects
+            
+            # Log summary
+            logger.info("="*80)
+            logger.info("GA EXPENSES BY PROJECT SUMMARY (All Sources Combined):")
+            for account_name, projects in expense_by_project.items():
+                if projects:
+                    total = sum(projects.values())
+                    logger.info(f"  {account_name}: {len(projects)} projects, Total: ${total:,.2f}")
+                    for project_name, project_amount in sorted(projects.items(), key=lambda x: x[1], reverse=True)[:5]:
+                        logger.info(f"    • {project_name}: ${project_amount:,.2f}")
+            logger.info("="*80)
+            
+            return expense_by_project
+            
+        except Exception as e:
+            logger.error(f"Error fetching GA expenses by project: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {}
+    
     def _get_journal_entries_for_cogs(
         self,
         start_date: str,
@@ -1339,6 +1424,452 @@ class QBODataFetcher:
             
         except Exception as e:
             logger.error(f"Error querying expenses for COGS: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {}
+    
+    def _get_journal_entries_for_ga(
+        self,
+        start_date: str,
+        end_date: str,
+        account_numbers: List[str]
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Query journal entries for GA accounts (e.g., 8005)
+        
+        Similar to _get_journal_entries_for_cogs but filters FOR GA transactions
+        (ClassRef belongs to GA) instead of filtering them out.
+        
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            account_numbers: List of account numbers to query (e.g., ['8005'])
+        
+        Returns:
+            Dictionary mapping account numbers to project breakdowns
+        """
+        try:
+            logger.info("="*80)
+            logger.info("FETCHING GA EXPENSES FROM JOURNAL ENTRIES")
+            logger.info(f"Accounts: {account_numbers}")
+            logger.info(f"Date range: {start_date} to {end_date}")
+            logger.info("="*80)
+            
+            # Query JournalEntry transactions
+            query = (
+                f"SELECT * FROM JournalEntry "
+                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
+                f"MAXRESULTS 1000"
+            )
+            
+            params = {'query': query, 'minorversion': '65'}
+            data = self._make_request('query', params)
+            
+            if not data or 'QueryResponse' not in data:
+                logger.warning("No journal entry data returned from query")
+                return {}
+            
+            # Initialize result structure keyed by account number
+            ga_data = {}
+            for account_num in account_numbers:
+                ga_data[account_num] = {}
+            
+            entries = data['QueryResponse'].get('JournalEntry', [])
+            logger.info(f"Processing {len(entries)} journal entries for GA")
+            
+            processed_count = 0
+            skipped_count = 0
+            
+            for entry in entries:
+                entry_number = entry.get('DocNumber', 'N/A')
+                lines = entry.get('Line', [])
+                
+                if not lines:
+                    continue
+                
+                for line in lines:
+                    # Get journal entry line detail
+                    journal_detail = line.get('JournalEntryLineDetail', {})
+                    if not journal_detail:
+                        continue
+                    
+                    # Check ClassRef - ONLY include if it belongs to GA (8005)
+                    class_ref = journal_detail.get('ClassRef', {})
+                    if not class_ref or not self._classref_belongs_to_ga(class_ref):
+                        logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - ClassRef does not belong to GA (8005)")
+                        skipped_count += 1
+                        continue
+                    
+                    # Get account reference
+                    account_ref = journal_detail.get('AccountRef', {})
+                    account_name = account_ref.get('name', '')
+                    
+                    if not account_name:
+                        continue
+                    
+                    # Extract account number from account name
+                    account_num = None
+                    account_match = re.search(r'(\d{4})', account_name)
+                    if account_match:
+                        account_num = account_match.group(1)
+                    else:
+                        # Try to match by name patterns
+                        account_name_lower = account_name.lower()
+                        if 'salaries' in account_name_lower and 'wage' in account_name_lower:
+                            if 'ga' in account_name_lower or 'general' in account_name_lower or 'administrative' in account_name_lower:
+                                account_num = '8005'
+                    
+                    # Check if this line is for one of our GA accounts
+                    if not account_num or account_num not in account_numbers:
+                        continue
+                    
+                    # Get amount and posting type
+                    amount = float(line.get('Amount', 0))
+                    posting_type = journal_detail.get('PostingType', '')
+                    
+                    # Debits increase expenses, Credits decrease expenses
+                    if posting_type != 'Debit':
+                        logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - PostingType is '{posting_type}' (not Debit)")
+                        skipped_count += 1
+                        continue
+                    
+                    if amount == 0:
+                        logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - Zero amount")
+                        skipped_count += 1
+                        continue
+                    
+                    # Extract project name from Entity
+                    project_name = None
+                    entity = line.get('Entity', {})
+                    entity_ref = entity.get('EntityRef', {})
+                    
+                    if entity_ref:
+                        entity_name = entity_ref.get('name', '')
+                        if entity_name:
+                            # Handle "Parent:Project" format
+                            if ':' in entity_name:
+                                project_name = entity_name.split(':')[-1].strip()
+                            else:
+                                project_name = entity_name.strip()
+                            
+                            # Normalize project name
+                            normalized = self._normalize_project_name(project_name)
+                            if normalized:
+                                project_name = normalized
+                    
+                    # Try line Description
+                    line_description = line.get('Description', '')
+                    if not project_name and line_description:
+                        extracted = self._extract_project_from_description(line_description)
+                        if extracted:
+                            project_name = extracted
+                    
+                    # Try transaction-level description
+                    txn_description = entry.get('PrivateNote', '') or entry.get('Description', '')
+                    if not project_name and txn_description:
+                        extracted = self._extract_project_from_description(txn_description)
+                        if extracted:
+                            project_name = extracted
+                    
+                    # If still no project name, categorize as "Unassigned"
+                    if not project_name:
+                        project_name = "Unassigned"
+                        logger.debug(f"  ⚠️ JE #{entry_number}: No project name found for {account_name} (Amount: ${amount:,.2f}) - Categorizing as 'Unassigned'")
+                    
+                    # Add to result
+                    if project_name not in ga_data[account_num]:
+                        ga_data[account_num][project_name] = 0.0
+                    
+                    ga_data[account_num][project_name] += abs(amount)
+                    processed_count += 1
+                    
+                    logger.info(f"  ✅ JE #{entry_number}: {account_num} → {project_name} = ${abs(amount):,.2f}")
+            
+            # Log summary
+            logger.info("="*80)
+            logger.info("JOURNAL ENTRIES GA SUMMARY:")
+            logger.info(f"  Processed: {processed_count} lines")
+            logger.info(f"  Skipped: {skipped_count} lines")
+            for account_num, projects in ga_data.items():
+                if projects:
+                    total = sum(projects.values())
+                    logger.info(f"  Account {account_num}: {len(projects)} projects, Total: ${total:,.2f}")
+                    for project_name, project_amount in sorted(projects.items(), key=lambda x: x[1], reverse=True)[:5]:
+                        logger.info(f"    • {project_name}: ${project_amount:,.2f}")
+            logger.info("="*80)
+            
+            return ga_data
+            
+        except Exception as e:
+            logger.error(f"Error querying journal entries for GA: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {}
+    
+    def _get_bills_for_ga(
+        self,
+        start_date: str,
+        end_date: str,
+        account_numbers: List[str]
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Query bills for GA accounts (e.g., 8005)
+        
+        Similar to _get_bills_for_cogs but filters FOR GA transactions.
+        
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            account_numbers: List of account numbers to query (e.g., ['8005'])
+        
+        Returns:
+            Dictionary mapping account numbers to project breakdowns
+        """
+        try:
+            logger.info("="*80)
+            logger.info("FETCHING GA EXPENSES FROM BILLS")
+            logger.info(f"Accounts: {account_numbers}")
+            logger.info(f"Date range: {start_date} to {end_date}")
+            logger.info("="*80)
+            
+            # Query Bill transactions
+            query = (
+                f"SELECT * FROM Bill "
+                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
+                f"MAXRESULTS 1000"
+            )
+            
+            params = {'query': query, 'minorversion': '65'}
+            data = self._make_request('query', params)
+            
+            if not data or 'QueryResponse' not in data:
+                logger.warning("No bill data returned from query")
+                return {}
+            
+            # Initialize result structure
+            ga_data = {}
+            for account_num in account_numbers:
+                ga_data[account_num] = {}
+            
+            bills = data['QueryResponse'].get('Bill', [])
+            logger.info(f"Processing {len(bills)} bills for GA")
+            
+            processed_count = 0
+            skipped_count = 0
+            
+            for bill in bills:
+                bill_id = bill.get('Id', 'N/A')
+                lines = bill.get('Line', [])
+                
+                if not lines:
+                    continue
+                
+                for line in lines:
+                    expense_line = line.get('ExpenseLineDetail', {})
+                    if not expense_line:
+                        continue
+                    
+                    # Check ClassRef - ONLY include if it belongs to GA (8005)
+                    class_ref = expense_line.get('ClassRef', {})
+                    if not class_ref or not self._classref_belongs_to_ga(class_ref):
+                        skipped_count += 1
+                        continue
+                    
+                    # Get account reference
+                    account_ref = expense_line.get('AccountRef', {})
+                    account_name = account_ref.get('name', '')
+                    
+                    if not account_name:
+                        continue
+                    
+                    # Extract account number
+                    account_num = None
+                    account_match = re.search(r'(\d{4})', account_name)
+                    if account_match:
+                        account_num = account_match.group(1)
+                    
+                    # Check if this is for one of our GA accounts
+                    if not account_num or account_num not in account_numbers:
+                        continue
+                    
+                    # Get amount
+                    amount = float(line.get('Amount', 0))
+                    if amount == 0:
+                        continue
+                    
+                    # Extract project from CustomerRef
+                    project_name = None
+                    customer_ref = expense_line.get('CustomerRef', {})
+                    if customer_ref:
+                        customer_name = customer_ref.get('name', '')
+                        if customer_name:
+                            normalized = self._normalize_project_name(customer_name)
+                            if normalized:
+                                project_name = normalized
+                    
+                    # If still no project name, categorize as "Unassigned"
+                    if not project_name:
+                        project_name = "Unassigned"
+                    
+                    # Add to result
+                    if project_name not in ga_data[account_num]:
+                        ga_data[account_num][project_name] = 0.0
+                    
+                    ga_data[account_num][project_name] += abs(amount)
+                    processed_count += 1
+                    
+                    logger.info(f"  ✅ Bill {bill_id}: {account_num} → {project_name} = ${abs(amount):,.2f}")
+            
+            # Log summary
+            logger.info("="*80)
+            logger.info("BILLS GA SUMMARY:")
+            logger.info(f"  Processed: {processed_count} lines")
+            logger.info(f"  Skipped: {skipped_count} lines")
+            for account_num, projects in ga_data.items():
+                if projects:
+                    total = sum(projects.values())
+                    logger.info(f"  Account {account_num}: {len(projects)} projects, Total: ${total:,.2f}")
+            logger.info("="*80)
+            
+            return ga_data
+            
+        except Exception as e:
+            logger.error(f"Error querying bills for GA: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return {}
+    
+    def _get_expenses_for_ga(
+        self,
+        start_date: str,
+        end_date: str,
+        account_numbers: List[str]
+    ) -> Dict[str, Dict[str, float]]:
+        """
+        Query expense/purchase transactions for GA accounts (e.g., 8005)
+        
+        Similar to _get_expenses_for_cogs but filters FOR GA transactions.
+        
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            account_numbers: List of account numbers to query (e.g., ['8005'])
+        
+        Returns:
+            Dictionary mapping account numbers to project breakdowns
+        """
+        try:
+            logger.info("="*80)
+            logger.info("FETCHING GA EXPENSES FROM EXPENSES/PURCHASES")
+            logger.info(f"Accounts: {account_numbers}")
+            logger.info(f"Date range: {start_date} to {end_date}")
+            logger.info("="*80)
+            
+            # Query Purchase transactions
+            purchase_query = (
+                f"SELECT * FROM Purchase "
+                f"WHERE TxnDate >= '{start_date}' AND TxnDate <= '{end_date}' "
+                f"MAXRESULTS 1000"
+            )
+            
+            params = {'query': purchase_query, 'minorversion': '65'}
+            purchase_data = self._make_request('query', params)
+            
+            # Initialize result structure
+            ga_data = {}
+            for account_num in account_numbers:
+                ga_data[account_num] = {}
+            
+            total_processed = 0
+            total_skipped = 0
+            
+            # Process Purchase transactions
+            if purchase_data and 'QueryResponse' in purchase_data:
+                purchases = purchase_data['QueryResponse'].get('Purchase', [])
+                logger.info(f"Processing {len(purchases)} Purchase transactions for GA")
+                
+                processed_count = 0
+                skipped_count = 0
+                
+                for purchase in purchases:
+                    txn_id = purchase.get('Id', 'N/A')
+                    lines = purchase.get('Line', [])
+                    
+                    for line in lines:
+                        expense_line = line.get('ExpenseLineDetail', {})
+                        if not expense_line:
+                            continue
+                        
+                        # Check ClassRef - ONLY include if it belongs to GA (8005)
+                        class_ref = expense_line.get('ClassRef', {})
+                        if not class_ref or not self._classref_belongs_to_ga(class_ref):
+                            skipped_count += 1
+                            continue
+                        
+                        # Get account reference
+                        account_ref = expense_line.get('AccountRef', {})
+                        account_name = account_ref.get('name', '')
+                        
+                        if not account_name:
+                            continue
+                        
+                        # Extract account number
+                        account_num = None
+                        account_match = re.search(r'(\d{4})', account_name)
+                        if account_match:
+                            account_num = account_match.group(1)
+                        
+                        # Check if this is for one of our GA accounts
+                        if not account_num or account_num not in account_numbers:
+                            continue
+                        
+                        # Get amount
+                        amount = float(line.get('Amount', 0))
+                        if amount == 0:
+                            continue
+                        
+                        # Extract project from CustomerRef
+                        project_name = None
+                        customer_ref = expense_line.get('CustomerRef', {})
+                        if customer_ref:
+                            customer_name = customer_ref.get('name', '')
+                            if customer_name:
+                                normalized = self._normalize_project_name(customer_name)
+                                if normalized:
+                                    project_name = normalized
+                        
+                        # If still no project name, categorize as "Unassigned"
+                        if not project_name:
+                            project_name = "Unassigned"
+                        
+                        # Add to result
+                        if project_name not in ga_data[account_num]:
+                            ga_data[account_num][project_name] = 0.0
+                        
+                        ga_data[account_num][project_name] += abs(amount)
+                        processed_count += 1
+                        total_processed += 1
+                        
+                        logger.info(f"  ✅ Purchase {txn_id}: {account_num} → {project_name} = ${abs(amount):,.2f}")
+                
+                total_skipped += skipped_count
+                logger.info(f"  Purchase: Processed {processed_count} lines, skipped {skipped_count} lines")
+            
+            # Log summary
+            logger.info("="*80)
+            logger.info("EXPENSES/PURCHASES GA SUMMARY:")
+            logger.info(f"  Total Processed: {total_processed} lines")
+            logger.info(f"  Total Skipped: {total_skipped} lines")
+            for account_num, projects in ga_data.items():
+                if projects:
+                    total = sum(projects.values())
+                    logger.info(f"  Account {account_num}: {len(projects)} projects, Total: ${total:,.2f}")
+            logger.info("="*80)
+            
+            return ga_data
+            
+        except Exception as e:
+            logger.error(f"Error querying expenses for GA: {e}")
             import traceback
             logger.error(f"Traceback: {traceback.format_exc()}")
             return {}
@@ -2362,16 +2893,29 @@ class QBODataFetcher:
             if not expense_categories:
                 logger.warning("No expense data found")
             
-            # PHASE 2: Integrate project-level expense data for accounts 5001 and 5011
+            # PHASE 2: Integrate project-level expense data for accounts 5001, 5011, and 8005
             logger.info("="*80)
             logger.info("PHASE 2: INTEGRATING PROJECT-LEVEL EXPENSE DATA")
             logger.info("="*80)
             try:
+                # Get COGS project expenses (5001, 5011)
                 project_expenses = self.get_expenses_by_project(
                     ['5001', '5011'],
                     start_date,
                     end_date
                 )
+                
+                # Get GA project expenses (8005)
+                ga_project_expenses = self.get_expenses_by_project_for_ga(
+                    ['8005'],
+                    start_date,
+                    end_date
+                )
+                
+                # Merge GA expenses into project_expenses
+                if ga_project_expenses:
+                    for account_name, projects in ga_project_expenses.items():
+                        project_expenses[account_name] = projects
                 
                 if project_expenses:
                     logger.info(f"Retrieved project expenses for {len(project_expenses)} accounts")
@@ -2394,6 +2938,8 @@ class QBODataFetcher:
                                 'Salaries & wages': '5001',
                                 '5011 Direct 1099 Labor': '5011',
                                 'Direct 1099 Labor': '5011',
+                                '8005 Salaries and Wages': '8005',
+                                'Salaries and Wages (GA)': '8005',
                             }
                             account_name_lower = account_name.lower()
                             for mapped_name, mapped_num in account_name_mapping.items():
