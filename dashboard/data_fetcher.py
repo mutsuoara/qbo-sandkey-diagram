@@ -2683,7 +2683,7 @@ class QBODataFetcher:
                 name = project_part
         
         # Check if it looks like a project name (has project indicators)
-        project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva']
+        project_indicators = ['a6', 'tws', 'cdsp', 'perigean', 'dmva', 'diffusion']
         if not any(indicator in name.lower() for indicator in project_indicators):
             return None
         
