@@ -977,20 +977,40 @@ class QBODataFetcher:
                             if extracted:
                                 project_name = extracted
                     
-                    # If still no project name, check if this is a Rippling salary duplicate
-                    # These should be excluded from COGS
+                    # If still no project name, check if this should be excluded from COGS
+                    # These are duplicate entries or invalid transactions that should not be in COGS
                     if not project_name:
-                        # Check for Rippling salary transactions with no project attribution
-                        # These are duplicate entries and should be excluded from COGS
+                        should_exclude = False
+                        exclude_reason = ""
+                        
+                        # Group 1: Rippling salary transactions with no project attribution
                         if '[rippling] salary for' in combined_description:
                             # Check if ClassRef exists and is not GA
                             class_ref = journal_detail.get('ClassRef', {})
                             if not class_ref or not self._classref_belongs_to_ga(class_ref):
-                                logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - Rippling salary with no project (duplicate entry): {line_description[:100] if line_description else 'N/A'}")
-                                skipped_count += 1
-                                continue
+                                should_exclude = True
+                                exclude_reason = "Rippling salary with no project (duplicate entry)"
                         
-                        # If not a Rippling duplicate, categorize as "Unassigned"
+                        # Group 2: Very short line descriptions (less than 20 characters) in Unassigned
+                        if not should_exclude and line_description:
+                            line_desc_trimmed = line_description.strip()
+                            if len(line_desc_trimmed) < 20:
+                                should_exclude = True
+                                exclude_reason = f"Very short line description ({len(line_desc_trimmed)} chars) in Unassigned"
+                        
+                        # Group 3: Empty line descriptions in Unassigned
+                        if not should_exclude:
+                            if not line_description or not line_description.strip():
+                                should_exclude = True
+                                exclude_reason = "Empty line description in Unassigned"
+                        
+                        # Exclude if any of the conditions are met
+                        if should_exclude:
+                            logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - {exclude_reason}: {line_description[:100] if line_description else 'N/A'}")
+                            skipped_count += 1
+                            continue
+                        
+                        # If not excluded, categorize as "Unassigned"
                         project_name = "Unassigned"
                         logger.debug(f"  ⚠️ JE #{entry_number}: No project name found for {account_name} (Amount: ${amount:,.2f}) - Categorizing as 'Unassigned'")
                         
