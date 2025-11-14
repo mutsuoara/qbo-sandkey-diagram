@@ -2737,6 +2737,8 @@ class QBODataFetcher:
             'cdsp': 'CDSP',
             'perigean': 'Perigean',
             'dmva': 'DMVA',
+            'diffusion marketplace': 'Diffusion Marketplace',
+            'diffusion': 'Diffusion Marketplace',  # Also match "Diffusion" alone
         }
         
         # Search for project keywords in description
