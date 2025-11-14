@@ -362,10 +362,16 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                 # Sort projects by amount (descending)
                 sorted_projects = sorted(projects.items(), key=lambda x: x[1], reverse=True)
                 
+                # Calculate total of all projects
+                project_total = sum(projects.values())
+                
                 # Format project breakdown (show all projects)
                 project_lines = []
                 for project_name, project_amount in sorted_projects:
                     project_lines.append(f"• {project_name}: ${project_amount:,.0f}")
+                
+                # Add total at the end
+                project_lines.append(f"<b>Total: ${project_total:,.0f}</b>")
                 
                 breakdown_parts.append(("<b>Projects:</b><br>" + "<br>".join(project_lines)))
             
