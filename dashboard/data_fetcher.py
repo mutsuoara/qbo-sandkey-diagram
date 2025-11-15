@@ -1147,6 +1147,14 @@ class QBODataFetcher:
             processed_count = 0
             skipped_count = 0
             
+            # Track excluded amounts by reason for debugging
+            excluded_amounts = {
+                '9_pattern': 0.0,
+                'rippling_no_project': 0.0,
+                'very_short_description': 0.0,
+                'empty_description': 0.0
+            }
+            
             for bill in bills:
                 bill_id = bill.get('Id', 'N/A')
                 lines = bill.get('Line', [])
@@ -1212,6 +1220,37 @@ class QBODataFetcher:
                         skipped_count += 1
                         continue
                     
+                    # Get descriptions for checking patterns
+                    line_description = line.get('Description', '')
+                    bill_description = bill.get('PrivateNote', '') or bill.get('DocNumber', '') or ''
+                    combined_description = (line_description + ' ' + bill_description).lower()
+                    
+                    # Check if this is an internal charge (9-*)
+                    # These don't belong in COGS accounts 5001/5011, they have their own accounts
+                    # Map 9- patterns to target accounts and skip from COGS
+                    if '9-' in combined_description or 'salary for 9-' in combined_description or '9 - ' in combined_description:
+                        # Map 9- patterns to target accounts
+                        target_account = None
+                        if '9-overhead' in combined_description:
+                            target_account = '7001'
+                        elif '9-general' in combined_description or '9-general & administrative' in combined_description or '9-general and administrative' in combined_description:
+                            target_account = '8005'
+                        elif '9-it' in combined_description:
+                            target_account = '8005'
+                        elif '9-research' in combined_description or '9-research & development' in combined_description or '9-research and development' in combined_description:
+                            target_account = '8601'
+                        elif '9-business' in combined_description or '9-business development' in combined_description:
+                            target_account = '8005'
+                        
+                        if target_account:
+                            excluded_amounts['9_pattern'] += abs(amount)
+                            logger.debug(f"  ⚠️ Skipping Bill {bill_id} line - Internal charge (9-*) routed to {target_account}: {line_description[:100] if line_description else 'N/A'}")
+                        else:
+                            excluded_amounts['9_pattern'] += abs(amount)
+                            logger.debug(f"  ⚠️ Skipping Bill {bill_id} line - Internal charge (9-*) with unknown pattern: {line_description[:100] if line_description else 'N/A'}")
+                        skipped_count += 1
+                        continue
+                    
                     # Extract project name from CustomerRef
                     project_name = None
                     
@@ -1270,8 +1309,47 @@ class QBODataFetcher:
                                     project_name = normalized
                                     logger.info(f"  ✓ Extracted project '{project_name}' from vendor name '{vendor_name}' (5011 item)")
                     
-                    # If still no project name, categorize as "Unassigned"
+                    # If still no project name, check if this should be excluded from COGS
+                    # These are duplicate entries or invalid transactions that should not be in COGS
                     if not project_name:
+                        should_exclude = False
+                        exclude_reason = ""
+                        
+                        # Group 1: Rippling salary transactions with no project attribution
+                        if '[rippling] salary for' in combined_description:
+                            # Check if ClassRef exists and is not GA
+                            if not class_ref or not self._classref_belongs_to_ga(class_ref):
+                                should_exclude = True
+                                exclude_reason = "Rippling salary with no project (duplicate entry)"
+                        
+                        # Group 2: Very short line descriptions (less than 20 characters) in Unassigned
+                        if not should_exclude and line_description:
+                            line_desc_trimmed = line_description.strip()
+                            if len(line_desc_trimmed) < 20:
+                                should_exclude = True
+                                exclude_reason = f"Very short line description ({len(line_desc_trimmed)} chars) in Unassigned"
+                        
+                        # Group 3: Empty line descriptions in Unassigned
+                        if not should_exclude:
+                            if not line_description or not line_description.strip():
+                                should_exclude = True
+                                exclude_reason = "Empty line description in Unassigned"
+                        
+                        # Exclude if any of the conditions are met
+                        if should_exclude:
+                            # Track excluded amounts by reason
+                            if 'Rippling' in exclude_reason:
+                                excluded_amounts['rippling_no_project'] += abs(amount)
+                            elif 'Very short' in exclude_reason:
+                                excluded_amounts['very_short_description'] += abs(amount)
+                            elif 'Empty' in exclude_reason:
+                                excluded_amounts['empty_description'] += abs(amount)
+                            
+                            logger.debug(f"  ⚠️ Skipping Bill {bill_id} line - {exclude_reason} (Amount: ${abs(amount):,.2f}): {line_description[:100] if line_description else 'N/A'}")
+                            skipped_count += 1
+                            continue
+                        
+                        # If not excluded, categorize as "Unassigned"
                         project_name = "Unassigned"
                         logger.debug(f"  ⚠️ Bill {bill_id}: No project name found for {account_name} (Amount: ${amount:,.2f}) - Categorizing as 'Unassigned'")
                     
@@ -1289,6 +1367,18 @@ class QBODataFetcher:
             logger.info("BILLS COGS SUMMARY:")
             logger.info(f"  Processed: {processed_count} lines")
             logger.info(f"  Skipped: {skipped_count} lines")
+            if any(excluded_amounts.values()):
+                logger.info("  EXCLUDED AMOUNTS:")
+                if excluded_amounts['9_pattern'] > 0:
+                    logger.info(f"    9-pattern routing: ${excluded_amounts['9_pattern']:,.2f}")
+                if excluded_amounts['rippling_no_project'] > 0:
+                    logger.info(f"    Rippling no project: ${excluded_amounts['rippling_no_project']:,.2f}")
+                if excluded_amounts['very_short_description'] > 0:
+                    logger.info(f"    Very short description: ${excluded_amounts['very_short_description']:,.2f}")
+                if excluded_amounts['empty_description'] > 0:
+                    logger.info(f"    Empty description: ${excluded_amounts['empty_description']:,.2f}")
+                total_excluded = sum(excluded_amounts.values())
+                logger.info(f"    Total excluded: ${total_excluded:,.2f}")
             for account_num, projects in cogs_data.items():
                 if projects:
                     total = sum(projects.values())
@@ -1352,6 +1442,14 @@ class QBODataFetcher:
             
             total_processed = 0
             total_skipped = 0
+            
+            # Track excluded amounts by reason for debugging (across all transaction types)
+            excluded_amounts = {
+                '9_pattern': 0.0,
+                'rippling_no_project': 0.0,
+                'very_short_description': 0.0,
+                'empty_description': 0.0
+            }
             
             for query in queries:
                 txn_type = 'Purchase' if 'Purchase' in query else 'Expense'
@@ -1435,6 +1533,37 @@ class QBODataFetcher:
                             skipped_count += 1
                             continue
                         
+                        # Get descriptions for checking patterns
+                        line_description = line.get('Description', '')
+                        txn_description = txn.get('PrivateNote', '') or txn.get('DocNumber', '') or ''
+                        combined_description = (line_description + ' ' + txn_description).lower()
+                        
+                        # Check if this is an internal charge (9-*)
+                        # These don't belong in COGS accounts 5001/5011, they have their own accounts
+                        # Map 9- patterns to target accounts and skip from COGS
+                        if '9-' in combined_description or 'salary for 9-' in combined_description or '9 - ' in combined_description:
+                            # Map 9- patterns to target accounts
+                            target_account = None
+                            if '9-overhead' in combined_description:
+                                target_account = '7001'
+                            elif '9-general' in combined_description or '9-general & administrative' in combined_description or '9-general and administrative' in combined_description:
+                                target_account = '8005'
+                            elif '9-it' in combined_description:
+                                target_account = '8005'
+                            elif '9-research' in combined_description or '9-research & development' in combined_description or '9-research and development' in combined_description:
+                                target_account = '8601'
+                            elif '9-business' in combined_description or '9-business development' in combined_description:
+                                target_account = '8005'
+                            
+                            if target_account:
+                                excluded_amounts['9_pattern'] += abs(amount)
+                                logger.debug(f"  ⚠️ Skipping {txn_type} {txn_id} line - Internal charge (9-*) routed to {target_account}: {line_description[:100] if line_description else 'N/A'}")
+                            else:
+                                excluded_amounts['9_pattern'] += abs(amount)
+                                logger.debug(f"  ⚠️ Skipping {txn_type} {txn_id} line - Internal charge (9-*) with unknown pattern: {line_description[:100] if line_description else 'N/A'}")
+                            skipped_count += 1
+                            continue
+                        
                         # Extract project name from CustomerRef
                         project_name = None
                         
@@ -1473,8 +1602,47 @@ class QBODataFetcher:
                                 if extracted:
                                     project_name = extracted
                         
-                        # If still no project name, categorize as "Unassigned"
+                        # If still no project name, check if this should be excluded from COGS
+                        # These are duplicate entries or invalid transactions that should not be in COGS
                         if not project_name:
+                            should_exclude = False
+                            exclude_reason = ""
+                            
+                            # Group 1: Rippling salary transactions with no project attribution
+                            if '[rippling] salary for' in combined_description:
+                                # Check if ClassRef exists and is not GA
+                                if not class_ref or not self._classref_belongs_to_ga(class_ref):
+                                    should_exclude = True
+                                    exclude_reason = "Rippling salary with no project (duplicate entry)"
+                            
+                            # Group 2: Very short line descriptions (less than 20 characters) in Unassigned
+                            if not should_exclude and line_description:
+                                line_desc_trimmed = line_description.strip()
+                                if len(line_desc_trimmed) < 20:
+                                    should_exclude = True
+                                    exclude_reason = f"Very short line description ({len(line_desc_trimmed)} chars) in Unassigned"
+                            
+                            # Group 3: Empty line descriptions in Unassigned
+                            if not should_exclude:
+                                if not line_description or not line_description.strip():
+                                    should_exclude = True
+                                    exclude_reason = "Empty line description in Unassigned"
+                            
+                            # Exclude if any of the conditions are met
+                            if should_exclude:
+                                # Track excluded amounts by reason
+                                if 'Rippling' in exclude_reason:
+                                    excluded_amounts['rippling_no_project'] += abs(amount)
+                                elif 'Very short' in exclude_reason:
+                                    excluded_amounts['very_short_description'] += abs(amount)
+                                elif 'Empty' in exclude_reason:
+                                    excluded_amounts['empty_description'] += abs(amount)
+                                
+                                logger.debug(f"  ⚠️ Skipping {txn_type} {txn_id} line - {exclude_reason} (Amount: ${abs(amount):,.2f}): {line_description[:100] if line_description else 'N/A'}")
+                                skipped_count += 1
+                                continue
+                            
+                            # If not excluded, categorize as "Unassigned"
                             project_name = "Unassigned"
                             logger.debug(f"  ⚠️ {txn_type} {txn_id}: No project name found for {account_name} (Amount: ${amount:,.2f}) - Categorizing as 'Unassigned'")
                         
@@ -1496,6 +1664,18 @@ class QBODataFetcher:
             logger.info("EXPENSES/PURCHASES COGS SUMMARY:")
             logger.info(f"  Total Processed: {total_processed} lines")
             logger.info(f"  Total Skipped: {total_skipped} lines")
+            if any(excluded_amounts.values()):
+                logger.info("  EXCLUDED AMOUNTS:")
+                if excluded_amounts['9_pattern'] > 0:
+                    logger.info(f"    9-pattern routing: ${excluded_amounts['9_pattern']:,.2f}")
+                if excluded_amounts['rippling_no_project'] > 0:
+                    logger.info(f"    Rippling no project: ${excluded_amounts['rippling_no_project']:,.2f}")
+                if excluded_amounts['very_short_description'] > 0:
+                    logger.info(f"    Very short description: ${excluded_amounts['very_short_description']:,.2f}")
+                if excluded_amounts['empty_description'] > 0:
+                    logger.info(f"    Empty description: ${excluded_amounts['empty_description']:,.2f}")
+                total_excluded = sum(excluded_amounts.values())
+                logger.info(f"    Total excluded: ${total_excluded:,.2f}")
             for account_num, projects in cogs_data.items():
                 if projects:
                     total = sum(projects.values())
