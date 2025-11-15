@@ -1893,21 +1893,64 @@ def debug_pl_comparison():
         # Parse P&L to get account totals
         pl_totals = {}
         if pl_data and 'Rows' in pl_data:
-            rows = pl_data['Rows'].get('Row', [])
+            rows_data = pl_data['Rows']
+            # Handle both structures: dict with 'Row' key, or direct list
+            if isinstance(rows_data, dict) and 'Row' in rows_data:
+                rows = rows_data['Row']
+            elif isinstance(rows_data, list):
+                rows = rows_data
+            else:
+                rows = []
+            
             pl_totals = extract_account_totals(rows, ['5001', '8005'])
         
         # Get our calculated COGS breakdown
-        cogs_breakdown = data_fetcher.get_cogs_by_project(
-            start_date.strftime('%Y-%m-%d'),
-            end_date.strftime('%Y-%m-%d'),
-            ['5001', '8005']
-        )
+        # Note: 5001 uses get_expenses_by_project, 8005 uses get_expenses_by_project_for_ga
+        cogs_breakdown = {}
         
-        # Calculate our totals
-        our_totals = {
-            account: sum(projects.values())
-            for account, projects in cogs_breakdown.items()
+        # Get 5001 (COGS) breakdown
+        cogs_5001 = data_fetcher.get_expenses_by_project(
+            ['5001'],
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d')
+        )
+        cogs_breakdown.update(cogs_5001)
+        
+        # Get 8005 (GA) breakdown
+        cogs_8005 = data_fetcher.get_expenses_by_project_for_ga(
+            ['8005'],
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d')
+        )
+        cogs_breakdown.update(cogs_8005)
+        
+        # Calculate our totals - map account names to account numbers
+        # The methods return account names, but we need to map them to account numbers
+        account_name_to_number = {
+            "Billable Salaries and Wages": "5001",
+            "5001 Billable Salaries and Wages": "5001",
+            "8005 Salaries and Wages": "8005",
+            "Salaries and Wages": "8005"  # GA account might use this name
         }
+        
+        our_totals = {}
+        for account_name, projects in cogs_breakdown.items():
+            # Try to find account number from name
+            account_num = None
+            for name_key, num in account_name_to_number.items():
+                if name_key.lower() in account_name.lower():
+                    account_num = num
+                    break
+            
+            if account_num:
+                our_totals[account_num] = sum(projects.values())
+            else:
+                # Fallback: try to extract account number from name
+                import re
+                match = re.search(r'(\d{4})', account_name)
+                if match:
+                    account_num = match.group(1)
+                    our_totals[account_num] = sum(projects.values())
         
         # Compare
         comparison = {}
@@ -2131,12 +2174,28 @@ def extract_account_totals(rows, account_numbers):
                 amount_str = col_data[1].get('value', '0').replace(',', '').replace('$', '')
                 
                 # Check if this is one of our target accounts
+                # Match by account number (can be at start, middle, or end of name)
                 for account_num in account_numbers:
-                    if name.startswith(account_num):
-                        try:
-                            totals[account_num] = float(amount_str) if amount_str else 0
-                        except:
-                            pass
+                    # Check if account number appears in the name
+                    if account_num in name:
+                        # Also check for common account name patterns
+                        account_patterns = {
+                            '5001': ['5001', 'billable salaries', 'salaries & wages', 'cogs:salaries'],
+                            '8005': ['8005', 'salaries and wages', 'ga salaries']
+                        }
+                        
+                        name_lower = name.lower()
+                        patterns = account_patterns.get(account_num, [account_num])
+                        
+                        # Check if any pattern matches
+                        if any(pattern in name_lower for pattern in patterns):
+                            try:
+                                amount = float(amount_str) if amount_str else 0
+                                # Use absolute value (expenses are typically negative in P&L)
+                                totals[account_num] = abs(amount)
+                            except:
+                                pass
+                            break  # Found match, no need to check other accounts
             
             # Recurse into nested rows
             if 'Rows' in row:
