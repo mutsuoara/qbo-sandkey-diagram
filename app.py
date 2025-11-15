@@ -1858,6 +1858,293 @@ def download_account_analysis():
         return jsonify({
             "error": "File not found. Generate it first by visiting /debug/account-analysis"
         })
+@app.server.route('/debug/pl-vs-calculated')
+def debug_pl_comparison():
+    """Compare P&L report totals vs our calculated COGS totals"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime, timedelta
+    from flask import jsonify
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        if not tokens:
+            return jsonify({"error": "No tokens"})
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=credentials.get('environment', 'sandbox')
+        )
+        
+        # Get YTD
+        end_date = datetime.now()
+        start_date = datetime(end_date.year, 1, 1)
+        
+        # Get P&L report
+        pl_data = data_fetcher.get_profit_and_loss(
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d')
+        )
+        
+        # Parse P&L to get account totals
+        pl_totals = {}
+        if pl_data and 'Rows' in pl_data:
+            rows = pl_data['Rows'].get('Row', [])
+            pl_totals = extract_account_totals(rows, ['5001', '8005'])
+        
+        # Get our calculated COGS breakdown
+        cogs_breakdown = data_fetcher.get_cogs_by_project(
+            start_date.strftime('%Y-%m-%d'),
+            end_date.strftime('%Y-%m-%d'),
+            ['5001', '8005']
+        )
+        
+        # Calculate our totals
+        our_totals = {
+            account: sum(projects.values())
+            for account, projects in cogs_breakdown.items()
+        }
+        
+        # Compare
+        comparison = {}
+        for account in ['5001', '8005']:
+            pl_total = pl_totals.get(account, 0)
+            our_total = our_totals.get(account, 0)
+            difference = pl_total - our_total
+            
+            comparison[account] = {
+                "pl_report_total": pl_total,
+                "our_calculated_total": our_total,
+                "difference": difference,
+                "percentage_captured": (our_total / pl_total * 100) if pl_total > 0 else 0
+            }
+        
+        return jsonify({
+            "success": True,
+            "date_range": f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}",
+            "comparison": comparison,
+            "cogs_breakdown": cogs_breakdown
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()})
+
+@app.server.route('/debug/find-missing-transactions')
+def debug_find_missing():
+    """Find ALL transactions affecting 5001 and 8005"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime
+    from flask import jsonify
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=credentials.get('environment', 'sandbox')
+        )
+        
+        end_date = datetime.now()
+        start_date = datetime(end_date.year, 1, 1)
+        
+        # Query all transaction types
+        transaction_types = [
+            'JournalEntry',
+            'Bill',
+            'Purchase', 
+            'Expense',
+            'Check',
+            'VendorCredit',
+            'BillPayment'
+        ]
+        
+        results = {}
+        
+        for txn_type in transaction_types:
+            query = f"SELECT * FROM {txn_type} WHERE TxnDate >= '{start_date.strftime('%Y-%m-%d')}' AND TxnDate <= '{end_date.strftime('%Y-%m-%d')}' MAXRESULTS 1000"
+            
+            data = data_fetcher._make_request('query', {'query': query, 'minorversion': '65'})
+            
+            if not data or 'QueryResponse' not in data:
+                continue
+            
+            transactions = data['QueryResponse'].get(txn_type, [])
+            
+            # Find transactions with 5001 or 8005
+            matching_txns = []
+            for txn in transactions:
+                has_target_account = False
+                lines = txn.get('Line', [])
+                
+                for line in lines:
+                    # Check all possible line detail types
+                    account_name = None
+                    
+                    # Journal Entry
+                    je_detail = line.get('JournalEntryLineDetail', {})
+                    if je_detail:
+                        account_name = je_detail.get('AccountRef', {}).get('name', '')
+                    
+                    # Bill/Purchase/Expense
+                    account_detail = line.get('AccountBasedExpenseLineDetail', {})
+                    if account_detail:
+                        account_name = account_detail.get('AccountRef', {}).get('name', '')
+                    
+                    # Check/BillPayment might have different structure
+                    if not account_name and 'AccountRef' in line:
+                        account_name = line.get('AccountRef', {}).get('name', '')
+                    
+                    if account_name and (account_name.startswith('5001') or account_name.startswith('8005')):
+                        has_target_account = True
+                        break
+                
+                if has_target_account:
+                    matching_txns.append({
+                        'id': txn.get('Id'),
+                        'doc_number': txn.get('DocNumber', 'N/A'),
+                        'txn_date': txn.get('TxnDate'),
+                        'total': txn.get('TotalAmt', 0)
+                    })
+            
+            if matching_txns:
+                results[txn_type] = {
+                    'count': len(matching_txns),
+                    'transactions': matching_txns[:10]  # First 10
+                }
+        
+        return jsonify({
+            "success": True,
+            "date_range": f"{start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}",
+            "results": results
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()})
+
+@app.server.route('/debug/unassigned-transactions')
+def debug_unassigned():
+    """Find transactions affecting 5001/8005 that have NO project assignment"""
+    from utils.credentials import CredentialManager
+    from dashboard.data_fetcher import QBODataFetcher
+    from datetime import datetime
+    from flask import jsonify
+    
+    try:
+        credential_manager = CredentialManager()
+        tokens = credential_manager.get_tokens()
+        credentials = credential_manager.get_credentials()
+        
+        data_fetcher = QBODataFetcher(
+            access_token=tokens['access_token'],
+            realm_id=tokens['realm_id'],
+            environment=credentials.get('environment', 'sandbox')
+        )
+        
+        end_date = datetime.now()
+        start_date = datetime(end_date.year, 1, 1)
+        
+        # Query Journal Entries
+        query = f"SELECT * FROM JournalEntry WHERE TxnDate >= '{start_date.strftime('%Y-%m-%d')}' MAXRESULTS 1000"
+        data = data_fetcher._make_request('query', {'query': query, 'minorversion': '65'})
+        
+        unassigned = {
+            '5001': [],
+            '8005': []
+        }
+        
+        if data and 'QueryResponse' in data:
+            entries = data['QueryResponse'].get('JournalEntry', [])
+            
+            for entry in entries:
+                for line in entry.get('Line', []):
+                    je_detail = line.get('JournalEntryLineDetail', {})
+                    account_name = je_detail.get('AccountRef', {}).get('name', '')
+                    
+                    # Check if 5001 or 8005
+                    account_num = None
+                    if account_name.startswith('5001'):
+                        account_num = '5001'
+                    elif account_name.startswith('8005'):
+                        account_num = '8005'
+                    
+                    if not account_num:
+                        continue
+                    
+                    # Check if has Entity/Customer
+                    entity = line.get('Entity', {})
+                    entity_name = entity.get('EntityRef', {}).get('name', '')
+                    
+                    if not entity_name:  # NO PROJECT ASSIGNED!
+                        amount = float(line.get('Amount', 0))
+                        posting_type = je_detail.get('PostingType', '')
+                        
+                        if posting_type == 'Debit' and amount > 0:
+                            unassigned[account_num].append({
+                                'doc_number': entry.get('DocNumber', 'N/A'),
+                                'date': entry.get('TxnDate'),
+                                'amount': amount,
+                                'description': line.get('Description', 'No description')
+                            })
+        
+        # Calculate totals
+        summary = {}
+        for account, txns in unassigned.items():
+            summary[account] = {
+                'count': len(txns),
+                'total': sum(t['amount'] for t in txns),
+                'transactions': txns[:10]  # First 10
+            }
+        
+        return jsonify({
+            "success": True,
+            "unassigned_totals": summary
+        })
+        
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "traceback": traceback.format_exc()})
+
+# Helper function for extract_account_totals
+def extract_account_totals(rows, account_numbers):
+    """Recursively extract account totals from P&L rows"""
+    totals = {}
+    
+    def search_rows(row_list):
+        for row in row_list:
+            if not isinstance(row, dict):
+                continue
+            
+            # Check ColData or Header
+            col_data = row.get('ColData') or row.get('Header', {}).get('ColData', [])
+            if len(col_data) >= 2:
+                name = col_data[0].get('value', '')
+                amount_str = col_data[1].get('value', '0').replace(',', '').replace('$', '')
+                
+                # Check if this is one of our target accounts
+                for account_num in account_numbers:
+                    if name.startswith(account_num):
+                        try:
+                            totals[account_num] = float(amount_str) if amount_str else 0
+                        except:
+                            pass
+            
+            # Recurse into nested rows
+            if 'Rows' in row:
+                nested = row['Rows'].get('Row', [])
+                search_rows(nested)
+    
+    search_rows(rows)
+    return totals
 
 # Callback to set default date values
 @app.callback(
