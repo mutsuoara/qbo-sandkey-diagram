@@ -829,6 +829,7 @@ class QBODataFetcher:
             
             # Track excluded amounts by reason for debugging
             excluded_amounts = {
+                '9_pattern': 0.0,
                 'rippling_no_project': 0.0,
                 'very_short_description': 0.0,
                 'empty_description': 0.0
@@ -929,6 +930,7 @@ class QBODataFetcher:
                         elif '9-business' in combined_description or '9-business development' in combined_description:
                             target_account = '8005'
                         
+                        excluded_amounts['9_pattern'] += abs(amount)
                         if target_account:
                             logger.debug(f"  ⚠️ Skipping JE #{entry_number} line - Internal charge (9-*) routed to {target_account}: {line_description[:100] if line_description else 'N/A'}")
                         else:
@@ -1070,9 +1072,14 @@ class QBODataFetcher:
             total_excluded = sum(excluded_amounts.values())
             if total_excluded > 0:
                 logger.info(f"  ⚠️ EXCLUDED FROM COGS:")
-                logger.info(f"    • Rippling no project: ${excluded_amounts['rippling_no_project']:,.2f}")
-                logger.info(f"    • Very short descriptions: ${excluded_amounts['very_short_description']:,.2f}")
-                logger.info(f"    • Empty descriptions: ${excluded_amounts['empty_description']:,.2f}")
+                if excluded_amounts['9_pattern'] > 0:
+                    logger.info(f"    • 9-pattern routing: ${excluded_amounts['9_pattern']:,.2f}")
+                if excluded_amounts['rippling_no_project'] > 0:
+                    logger.info(f"    • Rippling no project: ${excluded_amounts['rippling_no_project']:,.2f}")
+                if excluded_amounts['very_short_description'] > 0:
+                    logger.info(f"    • Very short descriptions: ${excluded_amounts['very_short_description']:,.2f}")
+                if excluded_amounts['empty_description'] > 0:
+                    logger.info(f"    • Empty descriptions: ${excluded_amounts['empty_description']:,.2f}")
                 logger.info(f"    • Total Excluded: ${total_excluded:,.2f}")
             logger.info("="*80)
             
