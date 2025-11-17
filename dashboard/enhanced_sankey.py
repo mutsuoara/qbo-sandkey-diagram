@@ -143,7 +143,9 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # Income sources (left column, x=0)
     income_indices = {}
     for i, (source, amount) in enumerate(income_sources.items()):
-        node_labels.append(f"{source}<br>${amount:,.0f}")
+        # Calculate percentage relative to total revenue
+        percentage = (amount / total_revenue * 100) if total_revenue > 0 else 0
+        node_labels.append(f"{source}<br>${amount:,.0f}<br>({percentage:.1f}%)")
         node_colors.append("#27ae60")  # Green for income
         node_x_positions.append(0.0)
         income_indices[source] = i
@@ -170,7 +172,9 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                 primary_amount = primary_data.get('total', 0)
                 if primary_amount > 0:
                     idx = len(node_labels)
-                    node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
+                    # Calculate percentage relative to total expenses
+                    percentage = (primary_amount / total_expenses * 100) if total_expenses > 0 else 0
+                    node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}<br>({percentage:.1f}%)")
                     node_colors.append("#e67e22")  # Orange for primary categories
                     node_x_positions.append(0.67)
                     primary_indices[primary_name] = idx
@@ -224,7 +228,9 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                 primary_amount = primary_data.get('total', 0)
                 if primary_amount > 0:
                     idx = len(node_labels)
-                    node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
+                    # Calculate percentage relative to total expenses
+                    percentage = (primary_amount / total_expenses * 100) if total_expenses > 0 else 0
+                    node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}<br>({percentage:.1f}%)")
                     node_colors.append("#e74c3c")  # Red for expenses
                     node_x_positions.append(1.0)
                     primary_indices[primary_name] = idx  # Direct link from Total Revenue
@@ -460,71 +466,6 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         # Enable hover
         hovermode='closest'
     )
-    
-    # Add dollar scale to the Total Revenue (blue) node
-    # Calculate 10 intervals from $0 (top) to total_revenue (bottom)
-    scale_intervals = 10
-    scale_annotations = []
-    
-    # Position scale over/on top of the blue Total Revenue node
-    # Total Revenue node is at x=0.33 in Sankey coordinates
-    # Account for left margin: Sankey diagram area starts after left margin (60px)
-    # In paper coordinates, we need to map Sankey x=0.33 to actual position
-    # Approximate: left margin takes ~5-8% of total width, so Sankey x=0.33 maps to ~paper x=0.38-0.40
-    # But since Sankey centers and adjusts, try a slightly adjusted position
-    # The Sankey node at x=0.33 in its coordinate space, accounting for margins, should be around x=0.40 in paper
-    scale_x_position = 0.40  # Adjusted position to account for left margin and Sankey layout
-    
-    # Account for margins: title takes up top margin, adjust Y positions accordingly
-    # Plotly paper coordinates: 0 = bottom, 1 = top
-    # But we want to account for title area at top
-    title_margin_ratio = 0.12  # Approximate space taken by title (adjust if needed)
-    bottom_margin_ratio = 0.08  # Approximate space at bottom
-    
-    # Calculate available vertical space
-    available_height = 1.0 - title_margin_ratio - bottom_margin_ratio
-    
-    for i in range(scale_intervals + 1):  # +1 to include both $0 and max
-        # Calculate dollar amount for this interval (from top to bottom)
-        # Top is $0, bottom is total_revenue
-        dollar_amount = (total_revenue / scale_intervals) * i
-        
-        # Calculate Y position within available space
-        # We want $0 at top, total_revenue at bottom
-        # In Plotly: y=1 is top, y=0 is bottom
-        relative_y = i / scale_intervals  # 0 = top ($0), 1 = bottom (max)
-        # Map to available space: invert and add bottom margin offset
-        y_position = 1.0 - title_margin_ratio - (relative_y * available_height)
-        
-        # Format dollar amount - use compact format for readability
-        if dollar_amount >= 1000000:
-            formatted_amount = f"${dollar_amount/1000000:.1f}M"
-        elif dollar_amount >= 1000:
-            formatted_amount = f"${dollar_amount/1000:.0f}K"
-        else:
-            formatted_amount = f"${dollar_amount:,.0f}"
-        
-        # Add annotation
-        scale_annotations.append(
-            dict(
-                x=scale_x_position,
-                y=y_position,
-                text=formatted_amount,
-                showarrow=False,
-                xref="paper",  # Use paper coordinates (0-1)
-                yref="paper",  # Use paper coordinates (0-1)
-                xanchor="center",  # Center text on the blue line
-                yanchor="middle",
-                font=dict(size=9, color="#3498db"),  # Blue color to match Total Revenue node
-                bgcolor="rgba(255, 255, 255, 0.8)",  # Semi-transparent white background
-                bordercolor="#3498db",
-                borderwidth=1,
-                borderpad=3
-            )
-        )
-    
-    # Add all scale annotations to the figure
-    fig.update_layout(annotations=scale_annotations)
     
     return fig
 
