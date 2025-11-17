@@ -3266,6 +3266,18 @@ class QBODataFetcher:
                             if matching_secondary_name:
                                 # Add projects data to this secondary node
                                 secondary_data = primary_data['secondary'][matching_secondary_name]
+                                
+                                # Convert projects to tertiary sub-categories for proper breakdown display
+                                # This applies to 5001, 5011, and 8005 accounts
+                                if account_num in ['5001', '5011', '8005']:
+                                    # Store projects as tertiary sub-categories for breakdown display
+                                    if 'tertiary' not in secondary_data:
+                                        secondary_data['tertiary'] = {}
+                                    # Merge projects into tertiary (projects become the sub-categories)
+                                    secondary_data['tertiary'].update(projects)
+                                    logger.info(f"  ✅ Converted {len(projects)} projects to tertiary sub-categories for {matching_secondary_name}")
+                                
+                                # Also keep projects key for backward compatibility and hover tooltips
                                 secondary_data['projects'] = projects
                                 
                                 # Validate: Check if project total exceeds secondary total (log warning if it does)
