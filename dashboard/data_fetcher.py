@@ -3269,6 +3269,7 @@ class QBODataFetcher:
                                 
                                 # Convert projects to tertiary sub-categories for proper breakdown display
                                 # This applies to 5001, 5011, and 8005 accounts
+                                logger.info(f"  🔍 DEBUG: account_num='{account_num}' (type: {type(account_num).__name__}), checking if in ['5001', '5011', '8005']")
                                 if account_num in ['5001', '5011', '8005']:
                                     # Store projects as tertiary sub-categories for breakdown display
                                     if 'tertiary' not in secondary_data:
@@ -3276,6 +3277,8 @@ class QBODataFetcher:
                                     # Merge projects into tertiary (projects become the sub-categories)
                                     secondary_data['tertiary'].update(projects)
                                     logger.info(f"  ✅ Converted {len(projects)} projects to tertiary sub-categories for {matching_secondary_name}")
+                                else:
+                                    logger.info(f"  ⚠️ Account number '{account_num}' not in conversion list ['5001', '5011', '8005']")
                                 
                                 # Also keep projects key for backward compatibility and hover tooltips
                                 secondary_data['projects'] = projects
