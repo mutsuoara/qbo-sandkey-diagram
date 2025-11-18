@@ -472,36 +472,41 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     )
     
     # Add annotations for primary expense nodes on the left side
-    # Since y positions are auto-calculated, we'll estimate based on node order
+    # Calculate y positions based on cumulative flow values (how Plotly actually positions nodes)
     if primary_node_data:
         annotations = []
-        # Calculate approximate y positions based on node order
-        # Primary nodes are after income sources and total revenue
-        num_nodes_before_primaries = len(income_sources) + 1  # +1 for total revenue
-        total_primary_nodes = len(primary_node_data)
+        # Sort primary nodes by amount (descending) to match Plotly's positioning
+        sorted_primary_data = sorted(primary_node_data, key=lambda x: x[2], reverse=True)
         
-        # Estimate y spacing (nodes are distributed evenly in y-space)
-        # We'll use the figure's data to get actual positions after it's created
-        # For now, estimate based on node index
-        for i, (idx, name, amount, percentage) in enumerate(primary_node_data):
-            # Estimate y position: nodes are distributed from top (y=1) to bottom (y=0)
-            # Account for title margin at top
-            title_margin = 0.12
-            available_height = 1.0 - title_margin - 0.08  # bottom margin
-            # Calculate position: primary nodes come after income + revenue
-            node_order = num_nodes_before_primaries + i
-            total_nodes = len(node_labels)
-            # Estimate y position (inverted: 0 is bottom, 1 is top)
-            # Distribute nodes evenly in available space
-            y_position = 1.0 - title_margin - (node_order / max(total_nodes, 1)) * available_height
+        # Calculate cumulative values for positioning
+        # Plotly positions nodes based on cumulative flow values
+        all_primary_amounts = [amount for _, _, amount, _ in sorted_primary_data]
+        total_primary_amount = sum(all_primary_amounts)
+        
+        # Account for title margin at top
+        title_margin = 0.12
+        bottom_margin = 0.08
+        available_height = 1.0 - title_margin - bottom_margin
+        
+        # Calculate cumulative positions (nodes are positioned from top based on cumulative values)
+        cumulative = 0
+        for i, (idx, name, amount, percentage) in enumerate(sorted_primary_data):
+            # Calculate y position based on cumulative flow value
+            # Position is at the center of this node's "slice" of the total
+            cumulative += amount
+            # Y position is from top (1.0) going down
+            # Use cumulative position for the center of the node
+            y_center_ratio = cumulative / total_primary_amount - (amount / total_primary_amount / 2)
+            # Invert: 0 is bottom, 1 is top, so we subtract from 1
+            y_position = 1.0 - title_margin - (y_center_ratio * available_height)
             
             # Position annotation to the left of the node (x=0.67)
-            # Place it at x=0.50 (to the left of the node)
+            # Place it at x=0.55 (closer to the node)
             annotation_text = f"{name}<br>${amount:,.0f}<br>({percentage:.1f}%)"
             
             annotations.append(
                 dict(
-                    x=0.50,  # Position to the left of node at x=0.67
+                    x=0.55,  # Position to the left of node at x=0.67
                     y=y_position,
                     text=annotation_text,
                     showarrow=False,
