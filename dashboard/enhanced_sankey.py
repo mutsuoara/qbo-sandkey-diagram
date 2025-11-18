@@ -160,6 +160,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # Process hierarchical expenses
     primary_indices = {}  # Map primary names to node indices
     secondary_indices = {}  # Map (primary_name, secondary_name) to node indices
+    primary_node_data = []  # Store primary node data for annotations: (idx, name, amount, percentage)
     
     if expense_hierarchy:
         logger.info(f"Building hierarchical Sankey structure with {len(expense_hierarchy)} primaries")
@@ -174,7 +175,10 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     idx = len(node_labels)
                     # Calculate percentage relative to total expenses
                     percentage = (primary_amount / total_expenses * 100) if total_expenses > 0 else 0
-                    node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}<br>({percentage:.1f}%)")
+                    # Store primary node data for left-side annotation
+                    primary_node_data.append((idx, primary_name, primary_amount, percentage))
+                    # Set label to empty - we'll use annotations instead
+                    node_labels.append("")  # Empty label, will be replaced with annotation
                     node_colors.append("#e67e22")  # Orange for primary categories
                     node_x_positions.append(0.67)
                     primary_indices[primary_name] = idx
@@ -466,6 +470,57 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         # Enable hover
         hovermode='closest'
     )
+    
+    # Add annotations for primary expense nodes on the left side
+    # Since y positions are auto-calculated, we'll estimate based on node order
+    if primary_node_data:
+        annotations = []
+        # Calculate approximate y positions based on node order
+        # Primary nodes are after income sources and total revenue
+        num_nodes_before_primaries = len(income_sources) + 1  # +1 for total revenue
+        total_primary_nodes = len(primary_node_data)
+        
+        # Estimate y spacing (nodes are distributed evenly in y-space)
+        # We'll use the figure's data to get actual positions after it's created
+        # For now, estimate based on node index
+        for i, (idx, name, amount, percentage) in enumerate(primary_node_data):
+            # Estimate y position: nodes are distributed from top (y=1) to bottom (y=0)
+            # Account for title margin at top
+            title_margin = 0.12
+            available_height = 1.0 - title_margin - 0.08  # bottom margin
+            # Calculate position: primary nodes come after income + revenue
+            node_order = num_nodes_before_primaries + i
+            total_nodes = len(node_labels)
+            # Estimate y position (inverted: 0 is bottom, 1 is top)
+            # Distribute nodes evenly in available space
+            y_position = 1.0 - title_margin - (node_order / max(total_nodes, 1)) * available_height
+            
+            # Position annotation to the left of the node (x=0.67)
+            # Place it at x=0.50 (to the left of the node)
+            annotation_text = f"{name}<br>${amount:,.0f}<br>({percentage:.1f}%)"
+            
+            annotations.append(
+                dict(
+                    x=0.50,  # Position to the left of node at x=0.67
+                    y=y_position,
+                    text=annotation_text,
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    xanchor="right",  # Right-align text so it ends at the node
+                    yanchor="middle",
+                    font=dict(size=10, color="#e67e22"),  # Orange to match node color
+                    bgcolor="rgba(255, 255, 255, 0.9)",  # Semi-transparent white background
+                    bordercolor="#e67e22",
+                    borderwidth=1,
+                    borderpad=3
+                )
+            )
+        
+        # Add annotations to the figure
+        if annotations:
+            fig.update_layout(annotations=annotations)
+            logger.info(f"Added {len(annotations)} left-side annotations for primary expense nodes")
     
     return fig
 
