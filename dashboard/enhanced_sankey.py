@@ -160,7 +160,6 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # Process hierarchical expenses
     primary_indices = {}  # Map primary names to node indices
     secondary_indices = {}  # Map (primary_name, secondary_name) to node indices
-    primary_node_data = []  # Store primary node data for annotations: (idx, name, amount, percentage)
     
     if expense_hierarchy:
         logger.info(f"Building hierarchical Sankey structure with {len(expense_hierarchy)} primaries")
@@ -175,10 +174,8 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     idx = len(node_labels)
                     # Calculate percentage relative to total expenses
                     percentage = (primary_amount / total_expenses * 100) if total_expenses > 0 else 0
-                    # Store primary node data for left-side annotation
-                    primary_node_data.append((idx, primary_name, primary_amount, percentage))
-                    # Set label to empty - we'll use annotations instead
-                    node_labels.append("")  # Empty label, will be replaced with annotation
+                    # Restore label on the node itself (as before)
+                    node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}<br>({percentage:.1f}%)")
                     node_colors.append("#e67e22")  # Orange for primary categories
                     node_x_positions.append(0.67)
                     primary_indices[primary_name] = idx
@@ -471,61 +468,6 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         hovermode='closest'
     )
     
-    # Add annotations for primary expense nodes on the left side
-    # Calculate y positions based on cumulative flow values (how Plotly actually positions nodes)
-    if primary_node_data:
-        annotations = []
-        # Sort primary nodes by amount (descending) to match Plotly's positioning
-        sorted_primary_data = sorted(primary_node_data, key=lambda x: x[2], reverse=True)
-        
-        # Calculate cumulative values for positioning
-        # Plotly positions nodes based on cumulative flow values
-        all_primary_amounts = [amount for _, _, amount, _ in sorted_primary_data]
-        total_primary_amount = sum(all_primary_amounts)
-        
-        # Account for title margin at top
-        title_margin = 0.12
-        bottom_margin = 0.08
-        available_height = 1.0 - title_margin - bottom_margin
-        
-        # Calculate cumulative positions (nodes are positioned from top based on cumulative values)
-        cumulative = 0
-        for i, (idx, name, amount, percentage) in enumerate(sorted_primary_data):
-            # Calculate y position based on cumulative flow value
-            # Position is at the center of this node's "slice" of the total
-            cumulative += amount
-            # Y position is from top (1.0) going down
-            # Use cumulative position for the center of the node
-            y_center_ratio = cumulative / total_primary_amount - (amount / total_primary_amount / 2)
-            # Invert: 0 is bottom, 1 is top, so we subtract from 1
-            y_position = 1.0 - title_margin - (y_center_ratio * available_height)
-            
-            # Position annotation to the left of the node (x=0.67)
-            # Place it at x=0.55 (closer to the node)
-            annotation_text = f"{name}<br>${amount:,.0f}<br>({percentage:.1f}%)"
-            
-            annotations.append(
-                dict(
-                    x=0.55,  # Position to the left of node at x=0.67
-                    y=y_position,
-                    text=annotation_text,
-                    showarrow=False,
-                    xref="paper",
-                    yref="paper",
-                    xanchor="right",  # Right-align text so it ends at the node
-                    yanchor="middle",
-                    font=dict(size=10, color="#e67e22"),  # Orange to match node color
-                    bgcolor="rgba(255, 255, 255, 0.9)",  # Semi-transparent white background
-                    bordercolor="#e67e22",
-                    borderwidth=1,
-                    borderpad=3
-                )
-            )
-        
-        # Add annotations to the figure
-        if annotations:
-            fig.update_layout(annotations=annotations)
-            logger.info(f"Added {len(annotations)} left-side annotations for primary expense nodes")
     
     return fig
 
