@@ -68,7 +68,7 @@ This project follows a ground-up development approach with security and user exp
 ### Project Structure
 
 ```
-qbo-sankey-diagram-copilot/
+qbo-sankey-diagram/
 ├── app.py                   # Main Dash application
 ├── setup_wizard.py          # First-run credential setup
 ├── qbo_api/
