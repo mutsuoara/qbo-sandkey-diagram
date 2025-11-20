@@ -416,15 +416,18 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     )
     
     # Add dollar scale to the Total Revenue (blue) node
-    # Calculate 10 intervals from $0 (top) to total_revenue (bottom)
-    scale_intervals = 10
+    # Calculate 5 intervals from $0 (top) to total_revenue (bottom) for cleaner display
+    scale_intervals = 5  # Creates 6 labels: $0, $0.5M, $1.0M, $1.5M, $2.0M, $2.5M (for example)
     scale_annotations = []
     
     # Position scale directly on the blue Total Revenue node
     # Total Revenue node is at x=0.30 in Sankey coordinates
-    # In paper coordinates, accounting for left margin (60px) and diagram scaling,
-    # x=0.30 Sankey maps to approximately x=0.30 paper (they align well with margins)
-    scale_x_position = 0.30  # Positioned directly on the blue Total Revenue line
+    # Account for left margin (60px) in paper coordinates:
+    # Paper x = left_margin_ratio + (sankey_x * available_width_ratio)
+    # With 60px left margin and 60px right margin out of ~1200px total:
+    # Left margin = 60/1200 = 0.05, available width = 0.90
+    # So paper x = 0.05 + (0.30 * 0.90) = 0.05 + 0.27 = 0.32
+    scale_x_position = 0.32  # Adjusted to center directly on the blue Total Revenue line
     
     # Account for margins: title takes up top margin, adjust Y positions accordingly
     # Plotly paper coordinates: 0 = bottom, 1 = top
