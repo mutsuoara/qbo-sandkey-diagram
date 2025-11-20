@@ -263,6 +263,29 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                 target_indices.append(expense_idx)
                 values.append(amount)
     
+    # Store primary node info for left-side labels (only for hierarchical structure)
+    # This must be defined BEFORE the customdata loop that uses it
+    primary_node_info = []  # Will store (node_index, primary_name, amount, percentage) for annotation
+    
+    if expense_hierarchy:
+        # Collect info about orange primary nodes (those in the middle column with secondaries)
+        for primary_name, primary_data in expense_hierarchy.items():
+            secondaries = primary_data.get('secondary', {})
+            if secondaries and primary_name in primary_indices:
+                idx = primary_indices[primary_name]
+                # Verify this is an orange node
+                if idx < len(node_colors) and node_colors[idx] == "#e67e22":
+                    amount = primary_data.get('total', 0)
+                    # Calculate percentage of total expenses
+                    percentage = (amount / total_expenses * 100) if total_expenses > 0 else 0
+                    primary_node_info.append((idx, primary_name, amount, percentage))
+                    # Remove the label from node_labels for these nodes (we'll add as annotation)
+                    # Keep customdata intact for hover tooltips
+                    node_labels[idx] = ""  # Empty label, we'll use annotations instead
+                    logger.info(f"Will create left-side label for: {primary_name} (${amount:,.0f}, {percentage:.1f}% of expenses)")
+        
+        logger.info(f"Created {len(primary_node_info)} primary expense labels for left-side positioning")
+    
     # Create custom hover data for nodes with tertiary data
     logger.info(f"Creating hover data for {len(node_labels)} nodes")
     logger.info(f"Nodes with tertiary data: {list(node_tertiary_data.keys())}")
@@ -312,28 +335,6 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # Log summary
     custom_count = sum(1 for i in range(len(node_labels)) if i in node_tertiary_data)
     logger.info(f"Custom hover data created: {custom_count} with tertiary breakdown, {len(node_labels) - custom_count} with label only")
-    
-    # Store primary node info for left-side labels (only for hierarchical structure)
-    primary_node_info = []  # Will store (node_index, primary_name, amount) for annotation
-    
-    if expense_hierarchy:
-        # Collect info about orange primary nodes (those in the middle column with secondaries)
-        for primary_name, primary_data in expense_hierarchy.items():
-            secondaries = primary_data.get('secondary', {})
-            if secondaries and primary_name in primary_indices:
-                idx = primary_indices[primary_name]
-                # Verify this is an orange node
-                if idx < len(node_colors) and node_colors[idx] == "#e67e22":
-                    amount = primary_data.get('total', 0)
-                    # Calculate percentage of total expenses
-                    percentage = (amount / total_expenses * 100) if total_expenses > 0 else 0
-                    primary_node_info.append((idx, primary_name, amount, percentage))
-                    # Remove the label from node_labels for these nodes (we'll add as annotation)
-                    # Keep customdata intact for hover tooltips
-                    node_labels[idx] = ""  # Empty label, we'll use annotations instead
-                    logger.info(f"Will create left-side label for: {primary_name} (${amount:,.0f}, {percentage:.1f}% of expenses)")
-        
-        logger.info(f"Created {len(primary_node_info)} primary expense labels for left-side positioning")
     
     # Create the Sankey diagram
     fig = go.Figure(data=[go.Sankey(
