@@ -119,10 +119,13 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # Income sources (left column, x=0)
     income_indices = {}
     for i, (source, amount) in enumerate(income_sources.items()):
-        node_labels.append(f"{source}<br>${amount:,.0f}")
+        # Calculate percentage of total revenue
+        percentage = (amount / total_revenue * 100) if total_revenue > 0 else 0
+        node_labels.append(f"{source}<br>${amount:,.0f} ({percentage:.1f}%)")
         node_colors.append("#27ae60")  # Green for income
         node_x_positions.append(0.0)
         income_indices[source] = i
+        logger.info(f"Income source: {source} = ${amount:,.0f} ({percentage:.1f}% of revenue)")
     
     # Total revenue (center column, x=0.33)
     total_revenue_idx = len(income_sources)
@@ -197,10 +200,13 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         
         for expense, amount in expense_items:
             idx = len(node_labels)
-            node_labels.append(f"{expense}<br>${amount:,.0f}")
+            # Calculate percentage of total expenses
+            percentage = (amount / total_expenses * 100) if total_expenses > 0 else 0
+            node_labels.append(f"{expense}<br>${amount:,.0f} ({percentage:.1f}%)")
             node_colors.append("#e74c3c")  # Red for expenses
             node_x_positions.append(1.0)
             primary_indices[expense] = idx  # Use same dict for flat structure
+            logger.info(f"Flat expense: {expense} = ${amount:,.0f} ({percentage:.1f}% of expenses)")
     
     # Create links - use actual dollar amounts for proper node height alignment
     source_indices = []
@@ -285,8 +291,19 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             breakdown_html = "<br><br><b>Breakdown:</b><br>" + "<br>".join(tertiary_lines)
             custom_text = f"{node_labels[i]}{breakdown_html}"
             node_customdata.append(custom_text)
+        elif i < len(income_sources):
+            # Income node - add percentage context to hover
+            node_customdata.append(f"{node_labels[i]}<br><i>of Total Revenue</i>")
+        elif i in [idx for idx, _, _, _ in primary_node_info]:
+            # Primary expense node (orange) - add percentage and full label to customdata
+            # Find the matching primary info
+            for idx, primary_name, amount, percentage in primary_node_info:
+                if idx == i:
+                    custom_text = f"<b>{primary_name}</b><br>${amount:,.0f} ({percentage:.1f}%)<br><i>of Total Expenses</i>"
+                    node_customdata.append(custom_text)
+                    break
         else:
-            # No tertiary data - use the label as customdata
+            # No special data - use the label as customdata
             node_customdata.append(node_labels[i])
     
     # Create single hovertemplate that uses customdata
@@ -295,6 +312,28 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     # Log summary
     custom_count = sum(1 for i in range(len(node_labels)) if i in node_tertiary_data)
     logger.info(f"Custom hover data created: {custom_count} with tertiary breakdown, {len(node_labels) - custom_count} with label only")
+    
+    # Store primary node info for left-side labels (only for hierarchical structure)
+    primary_node_info = []  # Will store (node_index, primary_name, amount) for annotation
+    
+    if expense_hierarchy:
+        # Collect info about orange primary nodes (those in the middle column with secondaries)
+        for primary_name, primary_data in expense_hierarchy.items():
+            secondaries = primary_data.get('secondary', {})
+            if secondaries and primary_name in primary_indices:
+                idx = primary_indices[primary_name]
+                # Verify this is an orange node
+                if idx < len(node_colors) and node_colors[idx] == "#e67e22":
+                    amount = primary_data.get('total', 0)
+                    # Calculate percentage of total expenses
+                    percentage = (amount / total_expenses * 100) if total_expenses > 0 else 0
+                    primary_node_info.append((idx, primary_name, amount, percentage))
+                    # Remove the label from node_labels for these nodes (we'll add as annotation)
+                    # Keep customdata intact for hover tooltips
+                    node_labels[idx] = ""  # Empty label, we'll use annotations instead
+                    logger.info(f"Will create left-side label for: {primary_name} (${amount:,.0f}, {percentage:.1f}% of expenses)")
+        
+        logger.info(f"Created {len(primary_node_info)} primary expense labels for left-side positioning")
     
     # Create the Sankey diagram
     fig = go.Figure(data=[go.Sankey(
@@ -343,6 +382,50 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         hovermode='closest',
         showlegend=False
     )
+    
+    # Add annotations for primary expense labels (left side of orange nodes)
+    if primary_node_info:
+        annotations = []
+        
+        # Calculate Y positions - distribute evenly in the middle section
+        num_primaries = len(primary_node_info)
+        # Account for title margin and distribute in the available space
+        title_margin = 0.12  # Space taken by title
+        bottom_margin = 0.08  # Space at bottom
+        available_height = 1.0 - title_margin - bottom_margin
+        
+        # Start position and spacing
+        start_y = 1.0 - title_margin - (available_height * 0.2)  # Start 20% from top
+        spacing = (available_height * 0.6) / max(num_primaries - 1, 1)  # Use 60% of space
+        
+        for i, (node_idx, primary_name, amount, percentage) in enumerate(primary_node_info):
+            y_position = start_y - (i * spacing)
+            
+            # Format the label text with percentage
+            label_text = f"<b>{primary_name}</b><br>${amount:,.0f} ({percentage:.1f}%)"
+            
+            annotations.append(
+                dict(
+                    x=0.62,  # Just to the left of orange nodes (which are at x=0.67)
+                    y=y_position,
+                    text=label_text,
+                    showarrow=False,
+                    xref="paper",
+                    yref="paper",
+                    xanchor="right",  # Align text to the right (so it appears left of the node)
+                    yanchor="middle",
+                    font=dict(size=11, color="#2c3e50", family="Arial"),
+                    bgcolor="rgba(255, 255, 255, 0.9)",
+                    bordercolor="#e67e22",  # Orange border to match node
+                    borderwidth=1,
+                    borderpad=4
+                )
+            )
+            
+            logger.info(f"Added left-side annotation for {primary_name} at y={y_position:.2f} with {percentage:.1f}%")
+        
+        fig.update_layout(annotations=annotations)
+        logger.info(f"Added {len(annotations)} primary expense annotations on the left side with percentages")
     
     return fig
 
