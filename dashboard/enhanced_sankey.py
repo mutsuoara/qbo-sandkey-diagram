@@ -159,7 +159,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     if expense_hierarchy:
         logger.info(f"Building hierarchical Sankey structure with {len(expense_hierarchy)} primaries")
         
-        # First pass: Create primary nodes for those with secondaries (x=0.60) - UPDATED from 0.67
+        # First pass: Create primary nodes for those with secondaries (x=0.67)
         for primary_name, primary_data in expense_hierarchy.items():
             secondaries = primary_data.get('secondary', {})
             if secondaries:
@@ -169,11 +169,11 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     idx = len(node_labels)
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e67e22")  # Orange for primary categories
-                    node_x_positions.append(0.60)  # UPDATED from 0.67 for better spacing
+                    node_x_positions.append(0.67)  # Keep at 0.67 for balanced spacing
                     primary_indices[primary_name] = idx
                     logger.info(f"  Created primary node: {primary_name} (idx={idx})")
         
-        # Second pass: Create secondary nodes (x=0.90) - UPDATED from 1.0
+        # Second pass: Create secondary nodes (x=1.0 - right edge for natural label placement)
         # Note: Tertiary categories are stored in expense_hierarchy but NOT displayed as nodes
         # They remain in the data structure for hover tooltip implementation
         for primary_name, primary_data in expense_hierarchy.items():
@@ -185,7 +185,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     if sec_amount > 0:
                         idx = len(node_labels)
                         node_labels.append(f"{sec_name}<br>${sec_amount:,.0f}")
-                        node_x_positions.append(0.90)  # UPDATED from 1.0 to leave room for labels
+                        node_x_positions.append(1.0)  # Right edge - labels will naturally appear on left
                         
                         # Store tertiary data for this node if it exists
                         tertiaries = sec_data.get('tertiary', {})
@@ -203,13 +203,13 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                         
                         secondary_indices[(primary_name, sec_name)] = idx
             else:
-                # Primary has no secondaries - create direct expense node (x=0.90) - UPDATED from 1.0
+                # Primary has no secondaries - create direct expense node (x=1.0 - right edge)
                 primary_amount = primary_data.get('total', 0)
                 if primary_amount > 0:
                     idx = len(node_labels)
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e74c3c")  # Red for expenses
-                    node_x_positions.append(0.90)  # UPDATED from 1.0 to leave room for labels
+                    node_x_positions.append(1.0)  # Right edge for natural label placement
                     primary_indices[primary_name] = idx  # Direct link from Total Revenue
                     logger.info(f"  Created direct expense node: {primary_name} (idx={idx})")
     else:
@@ -222,7 +222,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             idx = len(node_labels)
             node_labels.append(f"{expense}<br>${amount:,.0f}")
             node_colors.append("#e74c3c")  # Red for expenses
-            node_x_positions.append(0.90)  # UPDATED from 1.0 to leave room for labels
+            node_x_positions.append(1.0)  # Right edge for natural label placement
             primary_indices[expense] = idx  # Use same dict for flat structure
     
     # Net Income is now displayed as text below Total Revenue, not as a separate node
@@ -420,12 +420,11 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     scale_intervals = 10
     scale_annotations = []
     
-    # Position scale over/on top of the blue Total Revenue node
-    # Total Revenue node is at x=0.30 in Sankey coordinates (UPDATED from 0.33)
-    # Account for left margin: Sankey diagram area starts after left margin (60px)
-    # In paper coordinates, we need to map Sankey x=0.30 to actual position
-    # Approximate: left margin takes ~5-8% of total width, so Sankey x=0.30 maps to ~paper x=0.36-0.38
-    scale_x_position = 0.37  # UPDATED from 0.40 to match new Total Revenue position at x=0.30
+    # Position scale directly on the blue Total Revenue node
+    # Total Revenue node is at x=0.30 in Sankey coordinates
+    # In paper coordinates, accounting for left margin (60px) and diagram scaling,
+    # x=0.30 Sankey maps to approximately x=0.30 paper (they align well with margins)
+    scale_x_position = 0.30  # Positioned directly on the blue Total Revenue line
     
     # Account for margins: title takes up top margin, adjust Y positions accordingly
     # Plotly paper coordinates: 0 = bottom, 1 = top
