@@ -159,7 +159,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     if expense_hierarchy:
         logger.info(f"Building hierarchical Sankey structure with {len(expense_hierarchy)} primaries")
         
-        # First pass: Create primary nodes for those with secondaries (x=0.67)
+        # First pass: Create primary nodes for those with secondaries (x=0.65)
         for primary_name, primary_data in expense_hierarchy.items():
             secondaries = primary_data.get('secondary', {})
             if secondaries:
@@ -169,11 +169,11 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     idx = len(node_labels)
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e67e22")  # Orange for primary categories
-                    node_x_positions.append(0.67)  # Keep at 0.67 for balanced spacing
+                    node_x_positions.append(0.65)  # Positioned for balanced spacing with labels on left
                     primary_indices[primary_name] = idx
                     logger.info(f"  Created primary node: {primary_name} (idx={idx})")
         
-        # Second pass: Create secondary nodes (x=1.0 - right edge for natural label placement)
+        # Second pass: Create secondary nodes (x=0.85 - positioned so labels appear on left)
         # Note: Tertiary categories are stored in expense_hierarchy but NOT displayed as nodes
         # They remain in the data structure for hover tooltip implementation
         for primary_name, primary_data in expense_hierarchy.items():
@@ -185,7 +185,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     if sec_amount > 0:
                         idx = len(node_labels)
                         node_labels.append(f"{sec_name}<br>${sec_amount:,.0f}")
-                        node_x_positions.append(1.0)  # Right edge - labels will naturally appear on left
+                        node_x_positions.append(0.85)  # Moved left to allow labels on left side
                         
                         # Store tertiary data for this node if it exists
                         tertiaries = sec_data.get('tertiary', {})
@@ -203,13 +203,13 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                         
                         secondary_indices[(primary_name, sec_name)] = idx
             else:
-                # Primary has no secondaries - create direct expense node (x=1.0 - right edge)
+                # Primary has no secondaries - create direct expense node (x=0.85)
                 primary_amount = primary_data.get('total', 0)
                 if primary_amount > 0:
                     idx = len(node_labels)
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e74c3c")  # Red for expenses
-                    node_x_positions.append(1.0)  # Right edge for natural label placement
+                    node_x_positions.append(0.85)  # Positioned so labels appear on left side
                     primary_indices[primary_name] = idx  # Direct link from Total Revenue
                     logger.info(f"  Created direct expense node: {primary_name} (idx={idx})")
     else:
@@ -222,7 +222,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             idx = len(node_labels)
             node_labels.append(f"{expense}<br>${amount:,.0f}")
             node_colors.append("#e74c3c")  # Red for expenses
-            node_x_positions.append(1.0)  # Right edge for natural label placement
+            node_x_positions.append(0.85)  # Positioned so labels appear on left side
             primary_indices[expense] = idx  # Use same dict for flat structure
     
     # Net Income is now displayed as text below Total Revenue, not as a separate node
@@ -389,7 +389,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         font_size=10,  # Smaller font size for better readability and compact display
         height=dynamic_height,   # Dynamic height to accommodate all categories (Option C)
         width=None,   # Let it be responsive to container width
-        margin=dict(l=60, r=60, t=100, b=60),  # Reduced margins for more diagram space
+        margin=dict(l=60, r=120, t=100, b=60),  # Increased right margin for expense labels on left of nodes
         plot_bgcolor='white',
         paper_bgcolor='white',
         title_x=0.5,  # Center the title
