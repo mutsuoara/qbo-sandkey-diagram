@@ -1,11 +1,11 @@
 """
-Enhanced Sankey diagram with hierarchical expense structure
-Cleaned up to only include features that actually work with Plotly Sankey
+Enhanced Sankey diagram with zoom, pan, and dynamic sizing
 """
 
 import plotly.graph_objects as go
 import logging
 import re
+import math
 from typing import Dict, List, Any, Optional
 from datetime import datetime
 
@@ -42,11 +42,19 @@ def group_expenses_by_account_number(expense_categories: Dict[str, float]) -> Di
     logger.info(f"Grouping expenses: {len(expense_categories)} expenses before grouping")
     
     for expense_name, amount in expense_categories.items():
+        # Debug logging for account 8500 specifically
+        if '8500' in expense_name or 'GA Travel' in expense_name:
+            logger.info(f"🔍 Processing expense: '{expense_name}' = ${amount:,.2f}")
+        
         # Extract account number from start of name (e.g., "6001 Some Expense" -> 6001)
         match = re.match(r'^(\d{3,4})', expense_name)
         
         if match and amount < threshold:
             account_num = int(match.group(1))
+            
+            # Debug logging for account 8500
+            if account_num == 8500:
+                logger.info(f"🔍 Account 8500 found: amount=${amount:,.2f}, threshold=${threshold:,.2f}")
             
             # Check which group this account belongs to
             grouped = False
@@ -63,22 +71,35 @@ def group_expenses_by_account_number(expense_categories: Dict[str, float]) -> Di
             # If not in any group range, keep as individual
             if not grouped:
                 grouped_expenses[expense_name] = amount
+                if account_num == 8500:
+                    logger.info(f"✅ Account 8500 kept as individual expense: '{expense_name}' = ${amount:,.2f}")
         else:
             # Amount >= threshold OR no account number found - keep as individual
             grouped_expenses[expense_name] = amount
+            if '8500' in expense_name or 'GA Travel' in expense_name:
+                reason = "amount >= threshold" if match and amount >= threshold else "no account number found"
+                logger.info(f"✅ Account 8500 kept as individual (reason: {reason}): '{expense_name}' = ${amount:,.2f}")
     
     logger.info(f"After grouping: {len(grouped_expenses)} expenses remain")
+    if any('8500' in name or 'GA Travel' in name for name in grouped_expenses.keys()):
+        logger.info(f"✅ Account 8500 found in final grouped expenses")
+        for name, amt in grouped_expenses.items():
+            if '8500' in name or 'GA Travel' in name:
+                logger.info(f"  - '{name}': ${amt:,.2f}")
+    else:
+        logger.warning(f"⚠️ Account 8500 NOT found in final grouped expenses")
     
     return grouped_expenses
 
 def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=None):
-    """Create an enhanced Sankey diagram with hierarchical structure"""
+    """Create an enhanced Sankey diagram with zoom, pan, and dynamic sizing"""
     from datetime import datetime, timedelta
     
     # Set default date range (Year to Date if not provided)
     if end_date is None:
         end_date = datetime.now()
     if start_date is None:
+        # Year to Date (January 1st of current year)
         start_date = datetime(end_date.year, 1, 1)
     
     # Extract data from financial_data dictionary
@@ -113,26 +134,23 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     node_colors = []
     node_x_positions = []  # X positions for hierarchical layout
     
-    # Store tertiary data for hover tooltips
+    # Store tertiary data for hover tooltips (map node index to tertiary data)
     node_tertiary_data = {}  # Map node index -> list of (tertiary_name, tertiary_amount) tuples
     
     # Income sources (left column, x=0)
     income_indices = {}
     for i, (source, amount) in enumerate(income_sources.items()):
-        # Calculate percentage of total revenue
-        percentage = (amount / total_revenue * 100) if total_revenue > 0 else 0
-        node_labels.append(f"{source}<br>${amount:,.0f} ({percentage:.1f}%)")
+        node_labels.append(f"{source}<br>${amount:,.0f}")
         node_colors.append("#27ae60")  # Green for income
         node_x_positions.append(0.0)
         income_indices[source] = i
-        logger.info(f"Income source: {source} = ${amount:,.0f} ({percentage:.1f}% of revenue)")
     
-    # Total revenue (center column, x=0.33)
+    # Total revenue (center column, x=0.30) - UPDATED from 0.33
     total_revenue_idx = len(income_sources)
     net_income_text = f"<br><br><b>Net Income:</b> ${adjusted_gross_income:,.0f}" if adjusted_gross_income != 0 else ""
     node_labels.append(f"<b>Total Revenue</b><br>${total_revenue:,.0f}{net_income_text}")
     node_colors.append("#3498db")  # Blue for total revenue
-    node_x_positions.append(0.33)
+    node_x_positions.append(0.30)  # UPDATED from 0.33 for better label spacing
     
     # Process hierarchical expenses
     primary_indices = {}  # Map primary names to node indices
@@ -141,7 +159,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     if expense_hierarchy:
         logger.info(f"Building hierarchical Sankey structure with {len(expense_hierarchy)} primaries")
         
-        # First pass: Create primary nodes for those with secondaries (x=0.67)
+        # First pass: Create primary nodes for those with secondaries (x=0.60) - UPDATED from 0.67
         for primary_name, primary_data in expense_hierarchy.items():
             secondaries = primary_data.get('secondary', {})
             if secondaries:
@@ -151,11 +169,13 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     idx = len(node_labels)
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e67e22")  # Orange for primary categories
-                    node_x_positions.append(0.67)
+                    node_x_positions.append(0.60)  # UPDATED from 0.67 for better spacing
                     primary_indices[primary_name] = idx
                     logger.info(f"  Created primary node: {primary_name} (idx={idx})")
         
-        # Second pass: Create secondary nodes (x=1.0)
+        # Second pass: Create secondary nodes (x=0.90) - UPDATED from 1.0
+        # Note: Tertiary categories are stored in expense_hierarchy but NOT displayed as nodes
+        # They remain in the data structure for hover tooltip implementation
         for primary_name, primary_data in expense_hierarchy.items():
             secondaries = primary_data.get('secondary', {})
             if secondaries:
@@ -165,7 +185,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     if sec_amount > 0:
                         idx = len(node_labels)
                         node_labels.append(f"{sec_name}<br>${sec_amount:,.0f}")
-                        node_x_positions.append(1.0)
+                        node_x_positions.append(0.90)  # UPDATED from 1.0 to leave room for labels
                         
                         # Store tertiary data for this node if it exists
                         tertiaries = sec_data.get('tertiary', {})
@@ -173,23 +193,23 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                             # Store tertiary data as list of tuples for hover tooltip
                             tertiary_list = sorted(tertiaries.items(), key=lambda x: x[1], reverse=True)
                             node_tertiary_data[idx] = tertiary_list
-                            # Color code: Purple for nodes with tertiary breakdown
+                            # Color code: Purple/magenta for nodes with tertiary breakdown
                             node_colors.append("#9b59b6")  # Purple for secondary expenses with tertiaries
-                            logger.info(f"    Created secondary node with {len(tertiaries)} tertiaries: {sec_name} (idx={idx})")
+                            logger.info(f"    Created secondary node with {len(tertiaries)} tertiaries (purple color): {sec_name} (idx={idx})")
                         else:
                             # Color code: Red for nodes without tertiaries
                             node_colors.append("#e74c3c")  # Red for secondary expenses without tertiaries
-                            logger.info(f"    Created secondary node: {sec_name} (idx={idx})")
+                            logger.info(f"    Created secondary node (red color): {sec_name} (idx={idx})")
                         
                         secondary_indices[(primary_name, sec_name)] = idx
             else:
-                # Primary has no secondaries - create direct expense node (x=1.0)
+                # Primary has no secondaries - create direct expense node (x=0.90) - UPDATED from 1.0
                 primary_amount = primary_data.get('total', 0)
                 if primary_amount > 0:
                     idx = len(node_labels)
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e74c3c")  # Red for expenses
-                    node_x_positions.append(1.0)
+                    node_x_positions.append(0.90)  # UPDATED from 1.0 to leave room for labels
                     primary_indices[primary_name] = idx  # Direct link from Total Revenue
                     logger.info(f"  Created direct expense node: {primary_name} (idx={idx})")
     else:
@@ -200,24 +220,41 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         
         for expense, amount in expense_items:
             idx = len(node_labels)
-            # Calculate percentage of total expenses
-            percentage = (amount / total_expenses * 100) if total_expenses > 0 else 0
-            node_labels.append(f"{expense}<br>${amount:,.0f} ({percentage:.1f}%)")
+            node_labels.append(f"{expense}<br>${amount:,.0f}")
             node_colors.append("#e74c3c")  # Red for expenses
-            node_x_positions.append(1.0)
+            node_x_positions.append(0.90)  # UPDATED from 1.0 to leave room for labels
             primary_indices[expense] = idx  # Use same dict for flat structure
-            logger.info(f"Flat expense: {expense} = ${amount:,.0f} ({percentage:.1f}% of expenses)")
+    
+    # Net Income is now displayed as text below Total Revenue, not as a separate node
     
     # Create links - use actual dollar amounts for proper node height alignment
+    # Plotly Sankey uses link values to calculate node heights, so we need actual amounts
     source_indices = []
     target_indices = []
     values = []
     
+    # Threshold: values below $20k will appear as thin lines (for visual scaling)
+    threshold = 20000
+    min_log_value = 100  # Minimum for thin lines
+    
+    def scale_value(val):
+        """Scale value logarithmically: values < $20k become thin lines
+        NOTE: This is for visual link thickness only. Actual dollar amounts must be used
+        in the 'values' array for Plotly to calculate correct node heights."""
+        if val < threshold:
+            return min_log_value  # Thin line for values < $20k
+        else:
+            # Logarithmic scaling for values >= $20k (reduced scaling factor)
+            # log10(val / threshold) * scale_factor + min_value
+            log_factor = math.log10(max(val, 1) / threshold)
+            return min_log_value + (log_factor * threshold * 0.15)  # Reduced from 0.3 to 0.15
+    
     # Links from income sources to total revenue
+    # Use actual amounts so node heights match properly
     for i, (source, amount) in enumerate(income_sources.items()):
         source_indices.append(i)
         target_indices.append(total_revenue_idx)
-        values.append(amount)
+        values.append(amount)  # Use actual amount, not scaled
     
     # Links for hierarchical expense structure
     if expense_hierarchy:
@@ -228,21 +265,23 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             if primary_amount > 0:
                 if secondaries:
                     # Primary has secondaries - link Total Revenue → Primary
+                    # Use actual primary_amount so link height matches node height
                     if primary_name in primary_indices:
                         primary_idx = primary_indices[primary_name]
                         source_indices.append(total_revenue_idx)
                         target_indices.append(primary_idx)
-                        values.append(primary_amount)
+                        values.append(primary_amount)  # Use actual amount for proper alignment
                         logger.info(f"  Link: Total Revenue → {primary_name} (${primary_amount:,.0f})")
                         
                         # Then link Primary → each Secondary
+                        # Use actual amounts so secondary node heights match
                         for sec_name, sec_data in secondaries.items():
                             sec_amount = sec_data.get('total', 0)
                             if sec_amount > 0 and (primary_name, sec_name) in secondary_indices:
                                 sec_idx = secondary_indices[(primary_name, sec_name)]
                                 source_indices.append(primary_idx)
                                 target_indices.append(sec_idx)
-                                values.append(sec_amount)
+                                values.append(sec_amount)  # Use actual amount, not scaled
                                 logger.info(f"    Link: {primary_name} → {sec_name} (${sec_amount:,.0f})")
                 else:
                     # Primary has no secondaries - link directly from Total Revenue
@@ -250,7 +289,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                         primary_idx = primary_indices[primary_name]
                         source_indices.append(total_revenue_idx)
                         target_indices.append(primary_idx)
-                        values.append(primary_amount)
+                        values.append(primary_amount)  # Use actual amount for proper alignment
                         logger.info(f"  Link: Total Revenue → {primary_name} (direct, ${primary_amount:,.0f})")
     else:
         # Fallback to flat structure
@@ -261,99 +300,73 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                 expense_idx = primary_indices[expense]
                 source_indices.append(total_revenue_idx)
                 target_indices.append(expense_idx)
-                values.append(amount)
+                values.append(amount)  # Use actual amount for proper alignment
     
-    # Store primary node info for left-side labels (only for hierarchical structure)
-    # This must be defined BEFORE the customdata loop that uses it
-    primary_node_info = []  # Will store (node_index, primary_name, amount, percentage) for annotation
+    # No link to Net Income - it's displayed as text below Total Revenue
     
-    if expense_hierarchy:
-        # Collect info about orange primary nodes (those in the middle column with secondaries)
-        for primary_name, primary_data in expense_hierarchy.items():
-            secondaries = primary_data.get('secondary', {})
-            if secondaries and primary_name in primary_indices:
-                idx = primary_indices[primary_name]
-                # Verify this is an orange node
-                if idx < len(node_colors) and node_colors[idx] == "#e67e22":
-                    amount = primary_data.get('total', 0)
-                    # Calculate percentage of total expenses
-                    percentage = (amount / total_expenses * 100) if total_expenses > 0 else 0
-                    primary_node_info.append((idx, primary_name, amount, percentage))
-                    # Remove the label from node_labels for these nodes (we'll add as annotation)
-                    # Keep customdata intact for hover tooltips
-                    node_labels[idx] = ""  # Empty label, we'll use annotations instead
-                    logger.info(f"Will create left-side label for: {primary_name} (${amount:,.0f}, {percentage:.1f}% of expenses)")
-        
-        logger.info(f"Created {len(primary_node_info)} primary expense labels for left-side positioning")
+    # Note: Plotly Sankey only supports a single thickness value for all nodes
+    # To make Total Revenue appear larger, we increase global thickness
+    # The center node (Total Revenue) will benefit from this since it has the most connections
     
-    # Create custom hover data for nodes with tertiary data
+    # Create custom hover data using customdata for nodes with tertiary data
+    # Plotly Sankey supports customdata which can be referenced in hovertemplate
+    # All nodes get customdata - nodes with tertiaries get breakdown, others get their label
     logger.info(f"Creating hover data for {len(node_labels)} nodes")
     logger.info(f"Nodes with tertiary data: {list(node_tertiary_data.keys())}")
     
-    node_customdata = []
+    node_customdata = []  # Custom data array for hover tooltips
     
     for i in range(len(node_labels)):
         if i in node_tertiary_data:
             # This node has tertiary data - create custom data with breakdown
             tertiaries = node_tertiary_data[i]
-            logger.info(f"  Node {i} ({node_labels[i].split('<br>')[0]}): Creating hover with {len(tertiaries)} tertiaries")
+            logger.info(f"  Node {i} ({node_labels[i].split('<br>')[0]}): Creating custom hover data with {len(tertiaries)} tertiaries")
             
-            # Format tertiary breakdown (show top 10, then summarize if more)
-            max_items = 10
+            # Format tertiary breakdown - SHOW ALL ITEMS, NO TRUNCATION
             tertiary_lines = []
-            for tert_name, tert_amount in tertiaries[:max_items]:
+            for tert_name, tert_amount in tertiaries:
                 tertiary_lines.append(f"• {tert_name}: ${tert_amount:,.0f}")
             
-            # If more than 10, add summary
-            if len(tertiaries) > max_items:
-                remaining_count = len(tertiaries) - max_items
-                remaining_total = sum(amount for _, amount in tertiaries[max_items:])
-                tertiary_lines.append(f"...and {remaining_count} more item{'s' if remaining_count > 1 else ''}: ${remaining_total:,.0f}")
-            
             # Create custom data with tertiary breakdown
+            # Format: label + breakdown HTML
             breakdown_html = "<br><br><b>Breakdown:</b><br>" + "<br>".join(tertiary_lines)
             custom_text = f"{node_labels[i]}{breakdown_html}"
             node_customdata.append(custom_text)
-        elif i < len(income_sources):
-            # Income node - add percentage context to hover
-            node_customdata.append(f"{node_labels[i]}<br><i>of Total Revenue</i>")
-        elif i in [idx for idx, _, _, _ in primary_node_info]:
-            # Primary expense node (orange) - add percentage and full label to customdata
-            # Find the matching primary info
-            for idx, primary_name, amount, percentage in primary_node_info:
-                if idx == i:
-                    custom_text = f"<b>{primary_name}</b><br>${amount:,.0f} ({percentage:.1f}%)<br><i>of Total Expenses</i>"
-                    node_customdata.append(custom_text)
-                    break
+            
+            # Debug: log first few lines
+            logger.info(f"    Custom data preview (first 100 chars): {custom_text[:100]}...")
+            logger.info(f"    Total tertiary items included: {len(tertiaries)} (ALL items, no truncation)")
         else:
-            # No special data - use the label as customdata
+            # No tertiary data - use the label as customdata (will show same as default)
             node_customdata.append(node_labels[i])
     
     # Create single hovertemplate that uses customdata
+    # Since all nodes have customdata (either with breakdown or just label), we always use it
     hovertemplate = "%{customdata}<extra></extra>"
     
     # Log summary
     custom_count = sum(1 for i in range(len(node_labels)) if i in node_tertiary_data)
     logger.info(f"Custom hover data created: {custom_count} with tertiary breakdown, {len(node_labels) - custom_count} with label only")
+    logger.info(f"Using hovertemplate: {hovertemplate}")
     
-    # Create the Sankey diagram
+    # Create the enhanced Sankey diagram
     fig = go.Figure(data=[go.Sankey(
         node = dict(
-            pad = 25,
-            thickness = 35,
+            pad = 25,  # Reduced padding for tighter layout
+            thickness = 35,  # Increased thickness for all nodes (was 22) - makes center node more prominent
             line = dict(color = "black", width = 1),
             label = node_labels,
             color = node_colors,
-            x = node_x_positions,
+            x = node_x_positions if node_x_positions else [0.15, 0.5, 0.85],  # Use hierarchical positions if available
             y = None,  # Auto-arrange vertically
-            customdata = node_customdata,
-            hovertemplate = hovertemplate
+            customdata = node_customdata,  # Custom data for hover (breakdown for nodes with tertiaries, label for others)
+            hovertemplate = hovertemplate  # Single template that uses customdata
         ),
         link = dict(
             source = source_indices,
             target = target_indices,
-            value = values,
-            color = "rgba(0,0,0,0.2)"
+            value = values,  # Logarithmically scaled values for thickness
+            color = "rgba(0,0,0,0.2)"  # Subtle link colors
         )
     )])
     
@@ -361,83 +374,121 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     date_range = f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
     
     # Add title with financial summary and date range
+    # Check if income is by project or by account
     income_source_label = "Project Revenue" if len(income_sources) > 0 else "Account Revenue"
+    
     title_text = f"Financial Flow Analysis - {income_source_label} ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Net Income: ${adjusted_gross_income:,.0f}</sub>"
     
-    # Calculate dynamic height based on number of nodes
+    # Calculate dynamic height based on number of nodes (use node_labels length)
     num_nodes = len(node_labels)
-    # Dynamic height: min 500px, max 1500px, 30px per node
+    # Dynamic height: min 500px, max 1500px, 30px per node (more compact)
     dynamic_height = max(500, min(1500, 200 + (num_nodes * 30)))
     
     fig.update_layout(
         title_text=title_text,
-        font_size=10,
-        height=dynamic_height,
-        width=None,  # Responsive to container width
-        margin=dict(l=60, r=60, t=100, b=60),
+        font_size=10,  # Smaller font size for better readability and compact display
+        height=dynamic_height,   # Dynamic height to accommodate all categories (Option C)
+        width=None,   # Let it be responsive to container width
+        margin=dict(l=60, r=60, t=100, b=60),  # Reduced margins for more diagram space
         plot_bgcolor='white',
         paper_bgcolor='white',
-        title_x=0.5,
+        title_x=0.5,  # Center the title
         title_font_size=20,
-        autosize=True,
-        hovermode='closest',
+        # Enable zooming and panning
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        # Make it responsive
+        autosize=True,  # Enable responsive sizing
+        # Enable zoom and pan
+        dragmode='zoom',
+        # Add zoom controls
         showlegend=False
     )
     
-    # Add annotations for primary expense labels (left side of orange nodes)
-    if primary_node_info:
-        annotations = []
+    # Add zoom and pan controls
+    fig.update_layout(
+        # Enable zoom and pan
+        dragmode='zoom',
+        # Add selection mode
+        selectdirection='d',  # 'd' for diagonal selection
+        # Enable hover
+        hovermode='closest'
+    )
+    
+    # Add dollar scale to the Total Revenue (blue) node
+    # Calculate 10 intervals from $0 (top) to total_revenue (bottom)
+    scale_intervals = 10
+    scale_annotations = []
+    
+    # Position scale over/on top of the blue Total Revenue node
+    # Total Revenue node is at x=0.30 in Sankey coordinates (UPDATED from 0.33)
+    # Account for left margin: Sankey diagram area starts after left margin (60px)
+    # In paper coordinates, we need to map Sankey x=0.30 to actual position
+    # Approximate: left margin takes ~5-8% of total width, so Sankey x=0.30 maps to ~paper x=0.36-0.38
+    scale_x_position = 0.37  # UPDATED from 0.40 to match new Total Revenue position at x=0.30
+    
+    # Account for margins: title takes up top margin, adjust Y positions accordingly
+    # Plotly paper coordinates: 0 = bottom, 1 = top
+    # But we want to account for title area at top
+    title_margin_ratio = 0.12  # Approximate space taken by title (adjust if needed)
+    bottom_margin_ratio = 0.08  # Approximate space at bottom
+    
+    # Calculate available vertical space
+    available_height = 1.0 - title_margin_ratio - bottom_margin_ratio
+    
+    for i in range(scale_intervals + 1):  # +1 to include both $0 and max
+        # Calculate dollar amount for this interval (from top to bottom)
+        # Top is $0, bottom is total_revenue
+        dollar_amount = (total_revenue / scale_intervals) * i
         
-        # Calculate Y positions - distribute evenly in the middle section
-        num_primaries = len(primary_node_info)
-        # Account for title margin and distribute in the available space
-        title_margin = 0.12  # Space taken by title
-        bottom_margin = 0.08  # Space at bottom
-        available_height = 1.0 - title_margin - bottom_margin
+        # Calculate Y position within available space
+        # We want $0 at top, total_revenue at bottom
+        # In Plotly: y=1 is top, y=0 is bottom
+        relative_y = i / scale_intervals  # 0 = top ($0), 1 = bottom (max)
+        # Map to available space: invert and add bottom margin offset
+        y_position = 1.0 - title_margin_ratio - (relative_y * available_height)
         
-        # Start position and spacing
-        start_y = 1.0 - title_margin - (available_height * 0.2)  # Start 20% from top
-        spacing = (available_height * 0.6) / max(num_primaries - 1, 1)  # Use 60% of space
+        # Format dollar amount - use compact format for readability
+        if dollar_amount >= 1000000:
+            formatted_amount = f"${dollar_amount/1000000:.1f}M"
+        elif dollar_amount >= 1000:
+            formatted_amount = f"${dollar_amount/1000:.0f}K"
+        else:
+            formatted_amount = f"${dollar_amount:,.0f}"
         
-        for i, (node_idx, primary_name, amount, percentage) in enumerate(primary_node_info):
-            y_position = start_y - (i * spacing)
-            
-            # Format the label text with percentage
-            label_text = f"<b>{primary_name}</b><br>${amount:,.0f} ({percentage:.1f}%)"
-            
-            annotations.append(
-                dict(
-                    x=0.62,  # Just to the left of orange nodes (which are at x=0.67)
-                    y=y_position,
-                    text=label_text,
-                    showarrow=False,
-                    xref="paper",
-                    yref="paper",
-                    xanchor="right",  # Align text to the right (so it appears left of the node)
-                    yanchor="middle",
-                    font=dict(size=11, color="#2c3e50", family="Arial"),
-                    bgcolor="rgba(255, 255, 255, 0.9)",
-                    bordercolor="#e67e22",  # Orange border to match node
-                    borderwidth=1,
-                    borderpad=4
-                )
+        # Add annotation
+        scale_annotations.append(
+            dict(
+                x=scale_x_position,
+                y=y_position,
+                text=formatted_amount,
+                showarrow=False,
+                xref="paper",  # Use paper coordinates (0-1)
+                yref="paper",  # Use paper coordinates (0-1)
+                xanchor="center",  # Center text on the blue line
+                yanchor="middle",
+                font=dict(size=9, color="#3498db"),  # Blue color to match Total Revenue node
+                bgcolor="rgba(255, 255, 255, 0.8)",  # Semi-transparent white background
+                bordercolor="#3498db",
+                borderwidth=1,
+                borderpad=3
             )
-            
-            logger.info(f"Added left-side annotation for {primary_name} at y={y_position:.2f} with {percentage:.1f}%")
-        
-        fig.update_layout(annotations=annotations)
-        logger.info(f"Added {len(annotations)} primary expense annotations on the left side with percentages")
+        )
+    
+    # Add all scale annotations to the figure
+    fig.update_layout(annotations=scale_annotations)
     
     return fig
 
 def create_sample_sankey_diagram(start_date=None, end_date=None):
-    """Create a sample Sankey diagram for demonstration"""
+    """Create a sample Sankey diagram for demonstration with enhanced features"""
     from datetime import datetime, timedelta
     
     # Set default date range (Year to Date if not provided)
     if end_date is None:
         end_date = datetime.now()
     if start_date is None:
+        # Year to Date (January 1st of current year)
         start_date = datetime(end_date.year, 1, 1)
     
     # Sample financial data
@@ -507,22 +558,22 @@ def create_sample_sankey_diagram(start_date=None, end_date=None):
     target_indices.append(adjusted_gross_idx)
     values.append(adjusted_gross_income)
     
-    # Create the Sankey diagram
+    # Create the enhanced Sankey diagram
     fig = go.Figure(data=[go.Sankey(
         node = dict(
-            pad = 25,
-            thickness = 22,
+            pad = 25,  # Reduced padding for tighter layout
+            thickness = 22,  # Slightly thinner nodes for better fit
             line = dict(color = "black", width = 1),
             label = node_labels,
             color = node_colors,
-            x = [0.15, 0.5, 0.85],
+            x = [0.15, 0.5, 0.85],  # More centered positioning for responsive layout
             y = None  # Auto-arrange vertically
         ),
         link = dict(
             source = source_indices,
             target = target_indices,
             value = values,
-            color = "rgba(0,0,0,0.2)"
+            color = "rgba(0,0,0,0.2)"  # Subtle link colors
         )
     )])
     
@@ -530,25 +581,44 @@ def create_sample_sankey_diagram(start_date=None, end_date=None):
     date_range = f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
     
     # Add title with financial summary and date range
+    # Check if income is by project or by account
     income_source_label = "Project Revenue" if len(income_sources) > 0 else "Account Revenue"
+    
     title_text = f"Financial Flow Analysis - {income_source_label} ({date_range})<br><sub>Total Revenue: ${total_revenue:,.0f} | Total Expenses: ${total_expenses:,.0f} | Net Income: ${adjusted_gross_income:,.0f}</sub>"
     
     # Calculate dynamic height based on number of categories
     num_categories = len(income_sources) + len(expense_categories) + 2  # +2 for total revenue and adjusted gross
-    dynamic_height = max(800, min(2000, 300 + (num_categories * 80)))
+    # Much more generous height calculation - 80px per category with better min/max
+    dynamic_height = max(800, min(2000, 300 + (num_categories * 80)))  # Min 800, max 2000, 80px per category
     
     fig.update_layout(
         title_text=title_text,
-        font_size=18,
-        height=dynamic_height,
-        margin=dict(l=80, r=80, t=120, b=80),
+        font_size=18,  # Larger font for better readability
+        height=dynamic_height,  # Dynamic height based on content
+        margin=dict(l=80, r=80, t=120, b=80),  # More margin space
         plot_bgcolor='white',
         paper_bgcolor='white',
-        title_x=0.5,
+        title_x=0.5,  # Center the title
         title_font_size=20,
+        # Enable zooming and panning
+        xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+        # Make it responsive
         autosize=True,
-        hovermode='closest',
+        # Enable zoom and pan
+        dragmode='zoom',
+        # Add zoom controls
         showlegend=False
+    )
+    
+    # Add zoom and pan controls
+    fig.update_layout(
+        # Enable zoom and pan
+        dragmode='zoom',
+        # Add selection mode
+        selectdirection='d',  # 'd' for diagonal selection
+        # Enable hover
+        hovermode='closest'
     )
     
     return fig
