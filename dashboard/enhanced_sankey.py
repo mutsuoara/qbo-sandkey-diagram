@@ -169,7 +169,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     idx = len(node_labels)
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e67e22")  # Orange for primary categories
-                    node_x_positions.append(0.70)  # Positioned to force labels on left
+                    node_x_positions.append(0.75)  # Positioned to force labels on left
                     primary_indices[primary_name] = idx
                     logger.info(f"  Created primary node: {primary_name} (idx={idx})")
         
@@ -185,7 +185,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     if sec_amount > 0:
                         idx = len(node_labels)
                         node_labels.append(f"{sec_name}<br>${sec_amount:,.0f}")
-                        node_x_positions.append(0.95)  # Far right to force labels on left side
+                        node_x_positions.append(0.85)  # Far right to force labels on left side
                         
                         # Store tertiary data for this node if it exists
                         tertiaries = sec_data.get('tertiary', {})
@@ -209,7 +209,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     idx = len(node_labels)
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e74c3c")  # Red for expenses
-                    node_x_positions.append(0.95)  # Far right to force labels on left side
+                    node_x_positions.append(0.85)  # Far right to force labels on left side
                     primary_indices[primary_name] = idx  # Direct link from Total Revenue
                     logger.info(f"  Created direct expense node: {primary_name} (idx={idx})")
     else:
@@ -222,7 +222,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             idx = len(node_labels)
             node_labels.append(f"{expense}<br>${amount:,.0f}")
             node_colors.append("#e74c3c")  # Red for expenses
-            node_x_positions.append(0.95)  # Far right to force labels on left side
+            node_x_positions.append(0.85)  # Far right to force labels on left side
             primary_indices[expense] = idx  # Use same dict for flat structure
     
     # Net Income is now displayed as text below Total Revenue, not as a separate node
