@@ -349,6 +349,19 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     logger.info(f"Custom hover data created: {custom_count} with tertiary breakdown, {len(node_labels) - custom_count} with label only")
     logger.info(f"Using hovertemplate: {hovertemplate}")
     
+    # Debug: Log x positions to verify they're set correctly
+    logger.info(f"DEBUG: Total nodes: {len(node_labels)}, Total x positions: {len(node_x_positions)}")
+    if len(node_x_positions) == len(node_labels):
+        logger.info(f"DEBUG: X positions match node count - positions: {node_x_positions}")
+        # Log positions for primary nodes specifically
+        if expense_hierarchy:
+            for primary_name in primary_indices:
+                idx = primary_indices[primary_name]
+                if idx < len(node_x_positions):
+                    logger.info(f"DEBUG: Primary node '{primary_name}' (idx={idx}) has x position: {node_x_positions[idx]}")
+    else:
+        logger.warning(f"DEBUG: X positions count ({len(node_x_positions)}) doesn't match node count ({len(node_labels)})!")
+    
     # Create the enhanced Sankey diagram
     fig = go.Figure(data=[go.Sankey(
         node = dict(
