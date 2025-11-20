@@ -169,7 +169,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     idx = len(node_labels)
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e67e22")  # Orange for primary categories
-                    node_x_positions.append(0.75)  # Positioned to force labels on left
+                    node_x_positions.append(1.00)  # Positioned to force labels on left
                     primary_indices[primary_name] = idx
                     logger.info(f"  Created primary node: {primary_name} (idx={idx})")
         
