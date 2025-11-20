@@ -159,7 +159,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     if expense_hierarchy:
         logger.info(f"Building hierarchical Sankey structure with {len(expense_hierarchy)} primaries")
         
-        # First pass: Create primary nodes for those with secondaries (x=0.65)
+        # First pass: Create primary nodes for those with secondaries (x=0.70)
         for primary_name, primary_data in expense_hierarchy.items():
             secondaries = primary_data.get('secondary', {})
             if secondaries:
@@ -169,11 +169,11 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     idx = len(node_labels)
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e67e22")  # Orange for primary categories
-                    node_x_positions.append(0.65)  # Positioned for balanced spacing with labels on left
+                    node_x_positions.append(0.70)  # Positioned to force labels on left
                     primary_indices[primary_name] = idx
                     logger.info(f"  Created primary node: {primary_name} (idx={idx})")
         
-        # Second pass: Create secondary nodes (x=0.85 - positioned so labels appear on left)
+        # Second pass: Create secondary nodes (x=0.95 - far right to force labels on left)
         # Note: Tertiary categories are stored in expense_hierarchy but NOT displayed as nodes
         # They remain in the data structure for hover tooltip implementation
         for primary_name, primary_data in expense_hierarchy.items():
@@ -185,7 +185,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                     if sec_amount > 0:
                         idx = len(node_labels)
                         node_labels.append(f"{sec_name}<br>${sec_amount:,.0f}")
-                        node_x_positions.append(0.85)  # Moved left to allow labels on left side
+                        node_x_positions.append(0.95)  # Far right to force labels on left side
                         
                         # Store tertiary data for this node if it exists
                         tertiaries = sec_data.get('tertiary', {})
@@ -203,13 +203,13 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
                         
                         secondary_indices[(primary_name, sec_name)] = idx
             else:
-                # Primary has no secondaries - create direct expense node (x=0.85)
+                # Primary has no secondaries - create direct expense node (x=0.95)
                 primary_amount = primary_data.get('total', 0)
                 if primary_amount > 0:
                     idx = len(node_labels)
                     node_labels.append(f"{primary_name}<br>${primary_amount:,.0f}")
                     node_colors.append("#e74c3c")  # Red for expenses
-                    node_x_positions.append(0.85)  # Positioned so labels appear on left side
+                    node_x_positions.append(0.95)  # Far right to force labels on left side
                     primary_indices[primary_name] = idx  # Direct link from Total Revenue
                     logger.info(f"  Created direct expense node: {primary_name} (idx={idx})")
     else:
@@ -222,7 +222,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
             idx = len(node_labels)
             node_labels.append(f"{expense}<br>${amount:,.0f}")
             node_colors.append("#e74c3c")  # Red for expenses
-            node_x_positions.append(0.85)  # Positioned so labels appear on left side
+            node_x_positions.append(0.95)  # Far right to force labels on left side
             primary_indices[expense] = idx  # Use same dict for flat structure
     
     # Net Income is now displayed as text below Total Revenue, not as a separate node
@@ -389,7 +389,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         font_size=10,  # Smaller font size for better readability and compact display
         height=dynamic_height,   # Dynamic height to accommodate all categories (Option C)
         width=None,   # Let it be responsive to container width
-        margin=dict(l=60, r=120, t=100, b=60),  # Increased right margin for expense labels on left of nodes
+        margin=dict(l=60, r=180, t=100, b=60),  # Large right margin for expense labels on left of nodes
         plot_bgcolor='white',
         paper_bgcolor='white',
         title_x=0.5,  # Center the title
@@ -421,34 +421,51 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
     scale_annotations = []
     
     # Position scale directly on the blue Total Revenue node
-    # Total Revenue node is at x=0.30 in Sankey coordinates
-    # Account for left margin (60px) in paper coordinates:
+    # X-position: Account for left margin (60px) in paper coordinates
     # Paper x = left_margin_ratio + (sankey_x * available_width_ratio)
-    # With 60px left margin and 60px right margin out of ~1200px total:
-    # Left margin = 60/1200 = 0.05, available width = 0.90
-    # So paper x = 0.05 + (0.30 * 0.90) = 0.05 + 0.27 = 0.32
-    scale_x_position = 0.32  # Adjusted to center directly on the blue Total Revenue line
+    # With 60px left margin and 120px right margin out of ~1200px total:
+    # Left margin = 60/1200 = 0.05, available width = (1200-60-120)/1200 = 0.85
+    # So paper x = 0.05 + (0.30 * 0.85) = 0.05 + 0.255 = 0.305
+    scale_x_position = 0.305  # Adjusted to center directly on the blue Total Revenue line
     
-    # Account for margins: title takes up top margin, adjust Y positions accordingly
-    # Plotly paper coordinates: 0 = bottom, 1 = top
-    # But we want to account for title area at top
-    title_margin_ratio = 0.12  # Approximate space taken by title (adjust if needed)
-    bottom_margin_ratio = 0.08  # Approximate space at bottom
+    # Y-position: Position labels along the HEIGHT of the blue Total Revenue node
+    # The blue node's vertical extent is proportional to the total revenue flow
+    # Based on typical Sankey layout, the Total Revenue node occupies roughly:
+    # - Top edge: ~15-20% from chart top (after title margin)
+    # - Bottom edge: ~85-90% from chart top
+    # These positions need to be in paper coordinates (0 = bottom, 1 = top)
     
-    # Calculate available vertical space
-    available_height = 1.0 - title_margin_ratio - bottom_margin_ratio
+    # Account for title and bottom margins
+    title_margin_ratio = 0.12  # Space taken by title at top
+    bottom_margin_ratio = 0.08  # Space at bottom
+    available_height = 1.0 - title_margin_ratio - bottom_margin_ratio  # ~0.80
+    
+    # Estimate the blue node's vertical extent in the available space
+    # The node typically spans 60-70% of the available height, centered
+    node_height_ratio = 0.70  # Blue node occupies ~70% of available vertical space
+    node_center_y = 0.50  # Blue node is centered vertically in available space
+    
+    # Calculate top and bottom of the blue node in relative coordinates (0 to 1)
+    node_top_relative = node_center_y - (node_height_ratio / 2)  # ~0.15
+    node_bottom_relative = node_center_y + (node_height_ratio / 2)  # ~0.85
+    
+    # Convert to paper coordinates (accounting for margins)
+    # Paper y = bottom_margin + (relative_y * available_height)
+    # Note: Plotly y-axis: 0=bottom, 1=top, so we need to invert
+    node_top_paper = 1.0 - bottom_margin_ratio - (node_top_relative * available_height)  # Top of blue node
+    node_bottom_paper = 1.0 - bottom_margin_ratio - (node_bottom_relative * available_height)  # Bottom of blue node
     
     for i in range(scale_intervals + 1):  # +1 to include both $0 and max
-        # Calculate dollar amount for this interval (from top to bottom)
-        # Top is $0, bottom is total_revenue
-        dollar_amount = (total_revenue / scale_intervals) * i
+        # Calculate dollar amount for this interval
+        # Top of blue node = $0 (revenue starts here)
+        # Bottom of blue node = maximum revenue (revenue accumulates down)
+        dollar_amount = total_revenue * (i / scale_intervals)  # i=0 → $0, i=5 → max
         
-        # Calculate Y position within available space
-        # We want $0 at top, total_revenue at bottom
-        # In Plotly: y=1 is top, y=0 is bottom
-        relative_y = i / scale_intervals  # 0 = top ($0), 1 = bottom (max)
-        # Map to available space: invert and add bottom margin offset
-        y_position = 1.0 - title_margin_ratio - (relative_y * available_height)
+        # Calculate Y position along the HEIGHT of the blue node
+        # i=0 → top of blue node ($0)
+        # i=scale_intervals → bottom of blue node (max revenue)
+        relative_position = i / scale_intervals  # 0 to 1
+        y_position = node_top_paper - (relative_position * (node_top_paper - node_bottom_paper))
         
         # Format dollar amount - use compact format for readability
         if dollar_amount >= 1000000:
@@ -458,7 +475,7 @@ def create_enhanced_sankey_diagram(financial_data, start_date=None, end_date=Non
         else:
             formatted_amount = f"${dollar_amount:,.0f}"
         
-        # Add annotation
+        # Add annotation positioned on the blue Total Revenue line
         scale_annotations.append(
             dict(
                 x=scale_x_position,
